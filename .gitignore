@@ -1,0 +1,10 @@
+node_modules/
+dist/
+lib/
+tmp/
+work/
+playwright-report/
+test-results/
+outputs/*.tgz
+outputs/*.zip
+.git-codex/
