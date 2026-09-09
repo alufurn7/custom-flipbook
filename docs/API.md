@@ -45,7 +45,7 @@ The root must have measurable width and height. Supply at least one page. Call
 | `initialPage` | `number` | `0` | Initial zero-based page index |
 | `pageWidth` | `number` | `720` | Logical page width used for aspect ratio |
 | `pageHeight` | `number` | `1016` | Logical page height used for aspect ratio |
-| `turnDuration` | `number` | `285` | Maximum release animation duration in ms |
+| `turnDuration` | `number` | `600` | Drag-release duration in ms; automatic turns scale with remaining travel |
 | `autoplayInterval` | `number` | `3000` | Delay between automatic turns in ms |
 | `spreadBreakpoint` | `number` | `760` | Root width where two-page mode begins |
 | `preloadRadius` | `number` | `3` | Pages prepared on each side of the current page |

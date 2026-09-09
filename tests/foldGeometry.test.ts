@@ -1,12 +1,27 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateFold,
+  constrainPointer,
   polygonCss,
   reflectPoint,
   shouldCommitTurn
 } from "../src/geometry/foldGeometry";
 
 describe("fold geometry", () => {
+  it("fades the shadow at both ends of a full turn, symmetrically", () => {
+    for (const direction of [-1, 1]) {
+      const opacity = (travel: number) => calculateFold({
+        width: 400, height: 600, pageLeft: direction === -1 ? 400 : 0,
+        origin: { x: direction === -1 ? 800 : 0, y: 300 },
+        pointer: { x: (direction === -1 ? 800 : 0) + direction * travel, y: 300 },
+        maximumPointerDistance: 800
+      }).shadowOpacity;
+      expect(opacity(0)).toBeCloseTo(0);
+      expect(opacity(800)).toBeCloseTo(0);
+      expect(opacity(400)).toBeGreaterThan(opacity(200));
+      expect(opacity(200)).toBeCloseTo(opacity(600));
+    }
+  });
   it("uses the page diagonal as mask size", () => {
     const fold = calculateFold({
       width: 464,
@@ -45,6 +60,25 @@ describe("fold geometry", () => {
 });
 
 describe("middle-edge pointer constraint", () => {
+  it("keeps a bottom corner attached to both ends of the spine", () => {
+    const width = 400;
+    const height = 600;
+    const origin = { x: 800, y: 600 };
+    const constrained = constrainPointer(
+      { x: -600, y: -300 }, origin, width, height, 800, 400
+    );
+    expect(Math.hypot(constrained.x - 400, constrained.y - 600)).toBeLessThanOrEqual(width + 0.001);
+    expect(Math.hypot(constrained.x - 400, constrained.y)).toBeLessThanOrEqual(Math.hypot(width, height) + 0.001);
+  });
+
+  it("preserves the symmetric binding constraint for a left page", () => {
+    const constrained = constrainPointer(
+      { x: 1400, y: -300 }, { x: 0, y: 600 }, 400, 600, 800, 400
+    );
+    expect(Math.hypot(constrained.x - 400, constrained.y - 600)).toBeLessThanOrEqual(400.001);
+    expect(Math.hypot(constrained.x - 400, constrained.y)).toBeLessThanOrEqual(Math.hypot(400, 600) + 0.001);
+  });
+
   it("allows a full-width right drag to reach the centered spine", () => {
     const fold = calculateFold({
       width: 400,

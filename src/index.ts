@@ -4,8 +4,10 @@ export {
   ANIMATION_CALIBRATION,
   INTERACTION_CALIBRATION,
   SHADOW_CALIBRATION,
+  easeInOutCubic,
   easeOutCubic,
-  easeOutQuint
+  easeOutQuint,
+  easeOutSine
 } from "./calibration";
 
 export {

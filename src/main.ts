@@ -67,7 +67,7 @@ const engine = new FlipbookEngine(app, {
   initialPage: 0,
   pageWidth: 720,
   pageHeight: 1016,
-  turnDuration: 285,
+  turnDuration: 600,
   autoplayInterval: 3000,
   spreadBreakpoint: 760,
   preloadRadius: 3,

@@ -71,12 +71,13 @@ export const constrainPointer = (
   origin: Point,
   width: number,
   height: number,
-  maximumDistance = Math.hypot(width, height) * INTERACTION_CALIBRATION.pointerRadiusRatio
+  maximumDistance = Math.hypot(width, height) * INTERACTION_CALIBRATION.pointerRadiusRatio,
+  spineX?: number
 ): Point => {
   const delta = { x: pointer.x - origin.x, y: pointer.y - origin.y };
   const length = Math.hypot(delta.x, delta.y);
   const scale = length > maximumDistance ? maximumDistance / length : 1;
-  return {
+  let constrained = {
     x: origin.x + delta.x * scale,
     y: clamp(
       origin.y + delta.y * scale,
@@ -84,6 +85,30 @@ export const constrainPointer = (
       height * (1 + INTERACTION_CALIBRATION.verticalOvershootRatio)
     )
   };
+
+  if (spineX === undefined) return constrained;
+
+  const constrainToSpineAnchor = (anchor: Point, materialDistance: number): void => {
+    const offset = { x: constrained.x - anchor.x, y: constrained.y - anchor.y };
+    const pointerDistance = Math.hypot(offset.x, offset.y);
+    if (pointerDistance <= materialDistance || pointerDistance < EPSILON) return;
+    const anchorScale = materialDistance / pointerDistance;
+    constrained = {
+      x: anchor.x + offset.x * anchorScale,
+      y: anchor.y + offset.y * anchorScale
+    };
+  };
+
+  // Every point on the bound edge stays fixed. The endpoint constraints are
+  // sufficient for the whole straight spine because their squared-distance
+  // error varies linearly between the top and bottom anchors.
+  const topDistance = Math.hypot(width, origin.y);
+  const bottomDistance = Math.hypot(width, height - origin.y);
+  for (let iteration = 0; iteration < 4; iteration += 1) {
+    constrainToSpineAnchor({ x: spineX, y: 0 }, topDistance);
+    constrainToSpineAnchor({ x: spineX, y: height }, bottomDistance);
+  }
+  return constrained;
 };
 
 export const calculateFold = ({
@@ -94,7 +119,8 @@ export const calculateFold = ({
   pointer,
   maximumPointerDistance
 }: FoldInput): FoldGeometry => {
-  const safePointer = constrainPointer(pointer, origin, width, height, maximumPointerDistance);
+  const spineX = origin.x === pageLeft ? pageLeft + width : pageLeft;
+  const safePointer = constrainPointer(pointer, origin, width, height, maximumPointerDistance, spineX);
   const creasePoint = {
     x: (origin.x + safePointer.x) / 2,
     y: (origin.y + safePointer.y) / 2
@@ -117,6 +143,9 @@ export const calculateFold = ({
   const translationY = 2 * projection * normal.y;
   const travel = distance(origin, safePointer);
   const progress = clamp(travel / width, 0, 1);
+  // A complete turn travels two page widths; gesture commit progress reaches
+  // one halfway through that turn and must not drive the lighting envelope.
+  const shadowWave = Math.sin(Math.PI * clamp(travel / (2 * width), 0, 1));
 
   return {
     creasePoint,
@@ -127,8 +156,8 @@ export const calculateFold = ({
     stationaryPolygon,
     foldedPolygon,
     reflection: [reflectedA, reflectedB, reflectedB, reflectedD, translationX, translationY],
-    shadowWidth: SHADOW_CALIBRATION.widthBase + SHADOW_CALIBRATION.widthRange * Math.sin(progress * Math.PI),
-    shadowOpacity: SHADOW_CALIBRATION.opacityBase + SHADOW_CALIBRATION.opacityRange * Math.sin(progress * Math.PI)
+    shadowWidth: SHADOW_CALIBRATION.widthBase + SHADOW_CALIBRATION.widthRange * shadowWave,
+    shadowOpacity: (SHADOW_CALIBRATION.opacityBase + SHADOW_CALIBRATION.opacityRange) * shadowWave
   };
 };
 

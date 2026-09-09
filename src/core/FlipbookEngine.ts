@@ -1,15 +1,17 @@
 import {
   calculateFold,
   clamp,
+  constrainPointer,
   distance,
   polygonCss,
   shouldCommitTurn
 } from "../geometry/foldGeometry";
 import {
   ANIMATION_CALIBRATION,
-  easeOutCubic,
-  easeOutQuint,
-  INTERACTION_CALIBRATION
+  easeInOutCubic,
+  easeOutSine,
+  INTERACTION_CALIBRATION,
+  SHADOW_CALIBRATION
 } from "../calibration";
 import type {
   DisplayMode,
@@ -72,9 +74,13 @@ export class FlipbookEngine {
   private activeBand: GrabBand = "middle";
   private origin: Point = { x: 0, y: 0 };
   private pointer: Point = { x: 0, y: 0 };
+  private renderedPointer: Point = { x: 0, y: 0 };
+  private renderedVelocity: Point = { x: 0, y: 0 };
   private samples: PointerSample[] = [];
   private autoplayTimer: number | null = null;
   private animationFrame: number | null = null;
+  private dragFrame: number | null = null;
+  private dragFrameTimestamp = 0;
   private soundEnabled = true;
   private audioContext: AudioContext | null = null;
 
@@ -161,6 +167,7 @@ export class FlipbookEngine {
   destroy(): void {
     this.stopAutoplay();
     if (this.animationFrame !== null) cancelAnimationFrame(this.animationFrame);
+    if (this.dragFrame !== null) cancelAnimationFrame(this.dragFrame);
     this.resizeObserver.disconnect();
     for (const [index, content] of this.pageCache) this.pages[index].dispose?.(content);
     this.pageCache.clear();
@@ -199,8 +206,16 @@ export class FlipbookEngine {
       button.addEventListener("click", action);
       return button;
     };
-    const progressTrack = create("div", "flipbook-progress");
-    progressTrack.append(this.progress);
+    const more = create("details", "flipbook-more");
+    const toggle = create("summary", "flipbook-button");
+    toggle.setAttribute("aria-label", "More controls");
+    toggle.title = "More controls";
+    toggle.textContent = "⋯";
+    const extras = create("div", "flipbook-extra-controls");
+    more.append(toggle, extras);
+    more.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { more.open = false; toggle.focus(); }
+    });
     this.pageInput.type = "text";
     this.pageInput.inputMode = "numeric";
     this.pageInput.setAttribute("aria-label", "Page number");
@@ -219,18 +234,20 @@ export class FlipbookEngine {
     });
     this.controls.append(
       makeButton("Table of contents", "☰", () => this.toggleToc(), "toc-button"),
-      makeButton("First page", "⇤", () => this.first()),
-      makeButton("Previous page", "←", () => this.previous()),
+      makeButton("Previous page", "‹", () => this.previous()),
       this.pageInput,
-      makeButton("Next page", "→", () => this.next()),
+      makeButton("Next page", "›", () => this.next()),
+      makeButton("Fullscreen", "⛶", () => this.toggleFullscreen()),
+      more
+    );
+    extras.append(
+      makeButton("First page", "⇤", () => this.first()),
       makeButton("Last page", "⇥", () => this.last()),
-      progressTrack,
       makeButton("Zoom out", "−", () => this.setZoom(this.zoom - 0.25)),
       makeButton("Zoom in", "+", () => this.setZoom(this.zoom + 0.25)),
       makeButton("Reset view", "1:1", () => this.setZoom(1), "reset-button"),
       makeButton("Start autoplay", "▶", () => this.autoplayTimer === null ? this.startAutoplay() : this.stopAutoplay(), "autoplay-button"),
-      makeButton("Toggle sound", "♪", () => { this.soundEnabled = !this.soundEnabled; this.updateControls(); }, "sound-button"),
-      makeButton("Fullscreen", "⛶", () => this.toggleFullscreen())
+      makeButton("Toggle sound", "♪", () => { this.soundEnabled = !this.soundEnabled; this.updateControls(); }, "sound-button")
     );
   }
 
@@ -317,6 +334,7 @@ export class FlipbookEngine {
     this.bookWidth = this.pageWidth * spreadFactor;
     this.book.style.setProperty("--page-width", `${this.pageWidth}px`);
     this.book.style.setProperty("--page-height", `${this.pageHeight}px`);
+    this.book.dataset.displayMode = this.displayMode;
     this.book.style.width = `${this.bookWidth}px`;
     this.book.style.height = `${this.pageHeight}px`;
     this.phase = "resizing";
@@ -425,6 +443,8 @@ export class FlipbookEngine {
       y: this.activeBand === "top" ? 0 : this.activeBand === "bottom" ? this.pageHeight : clamp(local.y, 0, this.pageHeight)
     };
     this.pointer = local;
+    this.renderedPointer = this.constrainFoldPointer(local);
+    this.renderedVelocity = { x: 0, y: 0 };
     this.samples = [{ ...local, time: performance.now() }];
     this.phase = "dragging";
     this.book.setPointerCapture(event.pointerId);
@@ -450,7 +470,45 @@ export class FlipbookEngine {
     this.samples = this.samples.filter(
       (sample) => now - sample.time <= INTERACTION_CALIBRATION.velocityWindowMs
     );
-    this.renderFold(local);
+    this.scheduleDragRender(now);
+  }
+
+  private scheduleDragRender(timestamp: number): void {
+    if (this.dragFrame !== null) return;
+    this.dragFrameTimestamp = timestamp;
+    this.dragFrame = requestAnimationFrame((now) => this.renderDragFrame(now));
+  }
+
+  private renderDragFrame(now: number): void {
+    this.dragFrame = null;
+    if (this.phase !== "dragging") return;
+    const elapsed = clamp(now - this.dragFrameTimestamp, 1, 50);
+    this.dragFrameTimestamp = now;
+    const follow = 1 - Math.exp(-elapsed / INTERACTION_CALIBRATION.dragLagMs);
+    const previous = this.renderedPointer;
+    const target = this.constrainFoldPointer(this.pointer);
+    const next = {
+      x: this.renderedPointer.x + (target.x - this.renderedPointer.x) * follow,
+      y: this.renderedPointer.y + (target.y - this.renderedPointer.y) * follow
+    };
+    this.renderedVelocity = {
+      x: (next.x - previous.x) / elapsed,
+      y: (next.y - previous.y) / elapsed
+    };
+    this.renderedPointer = next;
+    if (distance(this.renderedPointer, target) < 0.35) {
+      this.renderedPointer = target;
+      this.renderedVelocity = { x: 0, y: 0 };
+      this.renderFold(this.renderedPointer);
+      return;
+    }
+    this.renderFold(this.renderedPointer);
+    this.dragFrame = requestAnimationFrame((timestamp) => this.renderDragFrame(timestamp));
+  }
+
+  private stopDragRender(): void {
+    if (this.dragFrame !== null) cancelAnimationFrame(this.dragFrame);
+    this.dragFrame = null;
   }
 
   private pointerUp(event: PointerEvent): void {
@@ -461,7 +519,7 @@ export class FlipbookEngine {
     }
     if (this.phase !== "dragging" || event.pointerId !== this.activePointer) return;
     const local = this.toLocal(event);
-    const geometry = this.renderFold(local);
+    const geometry = this.calculateGeometry(local);
     const velocity = this.releaseVelocity();
     const directionalVelocity = this.activeSide === "right" ? Math.max(0, -velocity.x) : Math.max(0, velocity.x);
     const returned = distance(local, this.origin) < Math.max(
@@ -469,15 +527,17 @@ export class FlipbookEngine {
       this.pageWidth * INTERACTION_CALIBRATION.returnRadiusRatio
     );
     const commit = shouldCommitTurn(geometry.progress, directionalVelocity, returned, this.reducedMotion.matches);
-    this.book.releasePointerCapture(event.pointerId);
+    this.stopDragRender();
     this.activePointer = null;
-    this.animateRelease(commit, local);
+    this.animateRelease(commit, this.renderedPointer);
+    if (this.book.hasPointerCapture(event.pointerId)) this.book.releasePointerCapture(event.pointerId);
   }
 
   private cancelGesture(): void {
     if (this.phase !== "dragging") return;
     this.activePointer = null;
-    this.animateRelease(false, this.pointer);
+    this.stopDragRender();
+    this.animateRelease(false, this.renderedPointer);
   }
 
   private endPan(): void {
@@ -526,49 +586,78 @@ export class FlipbookEngine {
     if (this.options.curvature === "multi-band") {
       foldedClip.append(create("div", "flipbook-curvature-shader"));
     }
+    foldedClip.append(create("div", "flipbook-fold-edge"));
     foldedClip.append(foldedShade);
     this.overlayLayer.append(stationaryClip, foldedClip, shadowClip);
   }
 
   private renderFold(pointer: Point) {
+    const geometry = this.calculateGeometry(pointer);
+    const stationary = this.overlayLayer.querySelector<HTMLElement>(".flipbook-stationary-clip");
+    const folded = this.overlayLayer.querySelector<HTMLElement>(".flipbook-folded-clip");
+    const reflected = this.overlayLayer.querySelector<HTMLElement>(".flipbook-reflected-surface");
+    const shadow = this.overlayLayer.querySelector<HTMLElement>(".flipbook-crease-shadow");
+    const shadowClip = this.overlayLayer.querySelector<HTMLElement>(".flipbook-shadow-clip");
+    const shade = this.overlayLayer.querySelector<HTMLElement>(".flipbook-folded-shade");
+    const curvature = this.overlayLayer.querySelector<HTMLElement>(".flipbook-curvature-shader");
+    const foldEdge = this.overlayLayer.querySelector<HTMLElement>(".flipbook-fold-edge");
+    const back = this.overlayLayer.querySelector<HTMLElement>(".flipbook-page-back");
+    if (stationary) stationary.style.clipPath = polygonCss(geometry.stationaryPolygon, this.bookWidth, this.pageHeight);
+    if (folded) folded.style.clipPath = polygonCss(geometry.foldedPolygon, this.bookWidth, this.pageHeight);
+    // Keep the crease lighting on the stationary sheet beside the lifted edge.
+    if (shadowClip) shadowClip.style.clipPath = polygonCss(geometry.stationaryPolygon, this.bookWidth, this.pageHeight);
+    if (reflected) reflected.style.transform = `matrix(${geometry.reflection.join(",")})`;
+    if (shadow) {
+      shadow.style.height = `${geometry.maskSize * 2}px`;
+      shadow.style.width = `${geometry.shadowWidth}px`;
+      shadow.style.opacity = `${geometry.shadowOpacity}`;
+      shadow.style.transform = `translate(${geometry.creasePoint.x}px, ${geometry.creasePoint.y}px) rotate(${geometry.angle}rad) translate(-50%, -50%)`;
+    }
+    const lightingWave = geometry.shadowOpacity / (SHADOW_CALIBRATION.opacityBase + SHADOW_CALIBRATION.opacityRange);
+    if (shade) shade.style.opacity = `${lightingWave * 0.24}`;
+    if (back) {
+      back.style.setProperty("--fold-light", `${lightingWave}`);
+      back.style.filter = `saturate(${1 - lightingWave * 0.08}) brightness(${1 - lightingWave * 0.02})`;
+    }
+    if (curvature) {
+      curvature.style.height = `${geometry.maskSize * 2}px`;
+      curvature.style.width = `${Math.min(this.pageWidth * 0.3, 32 + geometry.progress * 112)}px`;
+      curvature.style.opacity = `${lightingWave * 0.66}`;
+      curvature.style.transform = `translate(${geometry.creasePoint.x}px, ${geometry.creasePoint.y}px) rotate(${geometry.angle}rad) translate(-42%, -50%)`;
+    }
+    if (foldEdge) {
+      foldEdge.style.height = `${geometry.maskSize * 2}px`;
+      foldEdge.style.opacity = `${lightingWave * 0.9}`;
+      foldEdge.style.transform = `translate(${geometry.creasePoint.x}px, ${geometry.creasePoint.y}px) rotate(${geometry.angle}rad) translate(-18%, -50%)`;
+    }
+    return geometry;
+  }
+
+  private constrainFoldPointer(pointer: Point): Point {
     const pageLeft = this.sourcePageLeft(this.activeSide);
-    const geometry = calculateFold({
+    const spineX = this.activeSide === "right" ? pageLeft : pageLeft + this.pageWidth;
+    return constrainPointer(pointer, this.origin, this.pageWidth, this.pageHeight, this.pageWidth * 2, spineX);
+  }
+
+  private calculateGeometry(pointer: Point) {
+    const pageLeft = this.sourcePageLeft(this.activeSide);
+    return calculateFold({
       width: this.pageWidth,
       height: this.pageHeight,
       pageLeft,
       origin: this.origin,
       pointer,
-      maximumPointerDistance: this.bookWidth
+      maximumPointerDistance: this.pageWidth * 2
     });
-    const stationary = this.overlayLayer.querySelector<HTMLElement>(".flipbook-stationary-clip");
-    const folded = this.overlayLayer.querySelector<HTMLElement>(".flipbook-folded-clip");
-    const reflected = this.overlayLayer.querySelector<HTMLElement>(".flipbook-reflected-surface");
-    const shadow = this.overlayLayer.querySelector<HTMLElement>(".flipbook-crease-shadow");
-    const shade = this.overlayLayer.querySelector<HTMLElement>(".flipbook-folded-shade");
-    const curvature = this.overlayLayer.querySelector<HTMLElement>(".flipbook-curvature-shader");
-    if (stationary) stationary.style.clipPath = polygonCss(geometry.stationaryPolygon, this.bookWidth, this.pageHeight);
-    if (folded) folded.style.clipPath = polygonCss(geometry.foldedPolygon, this.bookWidth, this.pageHeight);
-    if (reflected) reflected.style.transform = `matrix(${geometry.reflection.join(",")})`;
-    if (shadow) {
-      shadow.style.width = `${geometry.shadowWidth}px`;
-      shadow.style.opacity = `${geometry.shadowOpacity}`;
-      shadow.style.transform = `translate(${geometry.creasePoint.x}px, ${geometry.creasePoint.y}px) rotate(${geometry.angle}rad) translateX(-50%)`;
-    }
-    if (shade) shade.style.opacity = `${0.08 + geometry.progress * 0.22}`;
-    if (curvature) {
-      const wave = Math.sin(geometry.progress * Math.PI);
-      curvature.style.width = `${Math.min(this.pageWidth * 0.3, 32 + geometry.progress * 112)}px`;
-      curvature.style.opacity = `${0.08 + wave * 0.58}`;
-      curvature.style.transform = `translate(${geometry.creasePoint.x}px, ${geometry.creasePoint.y}px) rotate(${geometry.angle}rad) translateX(-42%)`;
-    }
-    return geometry;
   }
 
-  private animateRelease(commit: boolean, start: Point): void {
+  private animateRelease(commit: boolean, start: Point, programmatic = false): void {
     this.phase = commit ? "committing" : "cancelling";
-    const destination = commit
-      ? { x: this.activeSide === "right" ? -this.pageWidth * 0.35 : this.bookWidth + this.pageWidth * 0.35, y: this.origin.y }
-      : this.origin;
+    const pageLeft = this.sourcePageLeft(this.activeSide);
+    const destination = commit ? {
+      x: this.activeSide === "right" ? pageLeft - this.pageWidth : pageLeft + this.pageWidth * 2,
+      y: this.origin.y
+    } : this.origin;
     const baseDuration = this.reducedMotion.matches ? 1 : this.options.turnDuration;
     const remaining = clamp(
       distance(start, destination) / (this.pageWidth * 1.35),
@@ -578,18 +667,7 @@ export class FlipbookEngine {
     const duration = Math.max(1, baseDuration * remaining);
     const started = performance.now();
 
-    const frame = (now: number) => {
-      const raw = clamp((now - started) / duration, 0, 1);
-      const eased = commit ? easeOutCubic(raw) : easeOutQuint(raw);
-      const point = {
-        x: start.x + (destination.x - start.x) * eased,
-        y: start.y + (destination.y - start.y) * eased
-      };
-      this.renderFold(point);
-      if (raw < 1) {
-        this.animationFrame = requestAnimationFrame(frame);
-        return;
-      }
+    const finish = () => {
       this.animationFrame = null;
       if (commit) {
         this.currentPage = this.targetPage(this.activeSide);
@@ -597,6 +675,50 @@ export class FlipbookEngine {
       }
       this.phase = "idle";
       this.renderIdle();
+    };
+
+    // Use the requested timing consistently for every drag release.
+    if (!programmatic) {
+      const releaseDuration = this.options.turnDuration;
+      const releaseFrame = (now: number) => {
+        const t = clamp((now - started) / releaseDuration, 0, 1);
+        // Move immediately, then continuously decelerate to zero at landing.
+        const eased = easeOutSine(t);
+        const point = {
+          x: start.x + (destination.x - start.x) * eased,
+          y: start.y + (destination.y - start.y) * eased
+        };
+        this.renderedPointer = point;
+        this.renderFold(point);
+        if (t < 1) {
+          this.animationFrame = requestAnimationFrame(releaseFrame);
+          return;
+        }
+        this.renderedPointer = { ...destination };
+        this.renderFold(destination);
+        finish();
+      };
+      this.animationFrame = requestAnimationFrame(releaseFrame);
+      return;
+    }
+
+    const frame = (now: number) => {
+      const raw = clamp((now - started) / duration, 0, 1);
+      const eased = programmatic ? easeInOutCubic(raw) : easeOutSine(raw);
+      const arcDirection = this.activeBand === "top" ? 1 : this.activeBand === "bottom" ? -1 : 0;
+      const releaseArc = commit
+        ? Math.sin(raw * Math.PI) * this.pageHeight * 0.035 * remaining * arcDirection
+        : 0;
+      const point = {
+        x: start.x + (destination.x - start.x) * eased,
+        y: start.y + (destination.y - start.y) * eased + releaseArc
+      };
+      this.renderFold(point);
+      if (raw < 1) {
+        this.animationFrame = requestAnimationFrame(frame);
+        return;
+      }
+      finish();
     };
     this.animationFrame = requestAnimationFrame(frame);
   }
@@ -612,7 +734,7 @@ export class FlipbookEngine {
     this.pointer = start;
     this.prepareTurnLayers(side);
     this.renderFold(start);
-    this.animateRelease(true, start);
+    this.animateRelease(true, start, true);
   }
 
   private canTurn(side: Side): boolean {
@@ -672,17 +794,32 @@ export class FlipbookEngine {
     if (this.samples.length < 2) return { x: 0, y: 0 };
     const first = this.samples[0];
     const last = this.samples[this.samples.length - 1];
+    if (performance.now() - last.time > INTERACTION_CALIBRATION.velocityWindowMs) {
+      return { x: 0, y: 0 };
+    }
     const elapsed = Math.max(1, last.time - first.time);
     return { x: (last.x - first.x) / elapsed, y: (last.y - first.y) / elapsed };
   }
 
   private updateThickness(): void {
-    const denominator = Math.max(1, this.pages.length - 1);
-    const progress = this.currentPage / denominator;
-    const leftWidth = this.currentPage === 0 ? 0 : Math.round(3 + 15 * progress);
-    const rightWidth = this.currentPage === this.pages.length - 1 ? 0 : Math.round(3 + 15 * (1 - progress));
-    this.thicknessLeft.style.width = `${leftWidth}px`;
-    this.thicknessRight.style.width = `${rightWidth}px`;
+    const visible = this.visibleIndices(this.currentPage);
+    const denominator = Math.max(1, this.pages.length - 2);
+    // Exclude the covers and the visible pages from the stacks behind them.
+    const leftRemaining = Math.max(0, visible[0] - 1);
+    const rightRemaining = Math.max(0, this.pages.length - 2 - visible[visible.length - 1]);
+    const drawStack = (stack: HTMLElement, amount: number) => {
+      const layers = amount <= 0 ? 0 : Math.max(1, Math.ceil(amount * 5));
+      stack.style.width = `${layers * 2}px`;
+      stack.replaceChildren();
+      for (let index = 0; index < layers; index += 1) {
+        const edge = create("span", "flipbook-paper-edge");
+        edge.style.setProperty("--edge-offset", `${index * 2}px`);
+        edge.style.setProperty("--edge-inset", `${2 + index * 1.5}px`);
+        stack.append(edge);
+      }
+    };
+    drawStack(this.thicknessLeft, leftRemaining / denominator);
+    drawStack(this.thicknessRight, rightRemaining / denominator);
   }
 
   private updateControls(): void {

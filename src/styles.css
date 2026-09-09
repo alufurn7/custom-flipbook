@@ -106,13 +106,21 @@ button { color: inherit; }
 .flipbook-page-left { left: 0; }
 .flipbook-page-right { right: 0; }
 .flipbook-page-single { left: 0; }
-.flipbook-page-back { filter: saturate(.92) brightness(.98); }
+.flipbook-book[data-display-mode="spread"] .flipbook-page-left { border-right: 0; }
+.flipbook-book[data-display-mode="spread"] .flipbook-page-right { border-left: 0; }
+.flipbook-page-back {
+  /* The parent reflection positions the folded sheet but also mirrors its DOM.
+     Counter-reflect the reverse face so its printed content stays upright. */
+  transform: scaleX(-1);
+  filter: saturate(.92) brightness(.98);
+}
 .flipbook-page-back::after {
   content: "";
   position: absolute;
   inset: 0;
   background: linear-gradient(90deg, rgba(40,45,48,.24), rgba(255,255,255,.03) 34%, rgba(255,255,255,.2));
   pointer-events: none;
+  opacity: var(--fold-light, 0);
 }
 .flipbook-page-content { width: 100%; height: 100%; overflow: hidden; }
 
@@ -131,27 +139,43 @@ button { color: inherit; }
 }
 .flipbook-thickness {
   position: absolute;
-  top: 3px;
-  bottom: -3px;
+  top: 0;
+  bottom: 0;
   z-index: 4;
   pointer-events: none;
-  background: repeating-linear-gradient(0deg, #ede9de 0 1px, #c5c0b4 1px 2px, #f9f6ee 2px 3px);
-  box-shadow: 0 0 7px rgba(31,36,39,.35);
-  transition: width .25s ease;
+  filter: drop-shadow(1px 1px 1px rgba(31,36,39,.16));
 }
-.flipbook-thickness-left { right: 100%; border-radius: 2px 0 0 2px; }
-.flipbook-thickness-right { left: 100%; border-radius: 0 2px 2px 0; }
+.flipbook-thickness-left { right: 100%; }
+.flipbook-thickness-right { left: 100%; }
+.flipbook-paper-edge {
+  position: absolute;
+  top: var(--edge-inset);
+  bottom: var(--edge-inset);
+  width: 2px;
+  background: #fafaf7;
+  border-top: 1px solid #c8c9c5;
+  border-bottom: 1px solid #c8c9c5;
+}
+.flipbook-thickness-right .flipbook-paper-edge {
+  left: var(--edge-offset);
+  border-right: 1px solid #b9bcb7;
+}
+.flipbook-thickness-left .flipbook-paper-edge {
+  right: var(--edge-offset);
+  border-left: 1px solid #b9bcb7;
+}
 
 .flipbook-crease-shadow {
   position: absolute;
   top: 0;
   left: 0;
   height: 220%;
-  transform-origin: 50% 0;
+  transform-origin: 0 0;
   pointer-events: none;
   will-change: transform, width, opacity;
-  background: linear-gradient(90deg, transparent 0%, rgba(20,25,28,.08) 24%, rgba(10,14,16,.42) 49%, rgba(255,255,255,.35) 56%, transparent 100%);
-  filter: blur(1px);
+  backface-visibility: hidden;
+  background: linear-gradient(90deg, transparent 0%, rgba(20,25,28,.04) 22%, rgba(10,14,16,.36) 72%, transparent 100%);
+  filter: blur(2px);
 }
 .flipbook-folded-shade {
   position: absolute;
@@ -167,7 +191,7 @@ button { color: inherit; }
   z-index: 3;
   width: 80px;
   height: 220%;
-  transform-origin: 50% 0;
+  transform-origin: 0 0;
   pointer-events: none;
   will-change: transform, width, opacity;
   background: linear-gradient(90deg,
@@ -183,6 +207,20 @@ button { color: inherit; }
   mix-blend-mode: soft-light;
   filter: blur(1.5px);
 }
+.flipbook-fold-edge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 5;
+  width: 7px;
+  height: 220%;
+  transform-origin: 0 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  background: linear-gradient(90deg, rgba(15,20,22,.24), rgba(255,255,255,.9) 44%, rgba(255,255,255,.2) 68%, transparent);
+  filter: blur(.35px);
+}
 
 .flipbook-controls {
   position: absolute;
@@ -192,14 +230,14 @@ button { color: inherit; }
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   max-width: calc(100% - 28px);
-  padding: 8px;
-  border: 1px solid rgba(255,255,255,.72);
-  border-radius: 16px;
+  padding: 5px 8px;
+  border: 1px solid rgba(35,54,60,.08);
+  border-radius: 12px;
   background: var(--paperfold-controls-background);
   color: var(--paperfold-controls-color);
-  box-shadow: 0 12px 35px rgba(28,36,40,.18);
+  box-shadow: 0 4px 16px rgba(28,36,40,.08);
   backdrop-filter: blur(18px);
 }
 .flipbook-button {
@@ -212,7 +250,9 @@ button { color: inherit; }
   border-radius: 10px;
   background: transparent;
   cursor: pointer;
-  font-weight: 750;
+  font-weight: 400;
+  color: inherit;
+  font-size: 18px;
 }
 .flipbook-button:hover { background: rgba(34, 72, 84, .1); }
 .flipbook-button:focus-visible,
@@ -224,11 +264,11 @@ button { color: inherit; }
 }
 .flipbook-button.is-muted { opacity: .42; }
 .flipbook-page-input {
-  width: 112px;
+  width: 90px;
   height: 38px;
-  border: 1px solid rgba(35,54,60,.2);
+  border: 0;
   border-radius: 9px;
-  background: rgba(255,255,255,.82);
+  background: transparent;
   text-align: center;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
@@ -239,6 +279,23 @@ button { color: inherit; }
   overflow: hidden;
   border-radius: 999px;
   background: rgba(34,62,70,.15);
+}
+.flipbook-more { position: relative; }
+.flipbook-more > summary { list-style: none; }
+.flipbook-more > summary::-webkit-details-marker { display: none; }
+.flipbook-extra-controls {
+  position: absolute;
+  right: -8px;
+  bottom: calc(100% + 16px);
+  display: grid;
+  grid-template-columns: repeat(3, 42px);
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid rgba(35,54,60,.1);
+  border-radius: 12px;
+  background: var(--paperfold-controls-background);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 4px 20px rgba(28,36,40,.12);
 }
 .flipbook-progress-fill {
   height: 100%;
@@ -320,7 +377,7 @@ button { color: inherit; }
   .flipbook-stage { inset: 12px 10px 80px; }
   .flipbook-controls { gap: 2px; padding: 6px; }
   .flipbook-button { min-width: 34px; height: 36px; padding: 0 7px; }
-  .flipbook-progress, .reset-button, .sound-button { display: none; }
+  .flipbook-progress { display: none; }
   .flipbook-page-input { width: 76px; }
   .flipbook-spine { display: none; }
 }
