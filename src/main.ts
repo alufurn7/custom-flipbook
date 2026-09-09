@@ -1,6 +1,8 @@
 import "./styles.css";
 import { FlipbookEngine } from "./core/FlipbookEngine";
+import { enablePdfZoom } from "./pdfZoom";
 import type { PageDefinition } from "./types";
+import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 const makePage = (
   title: string,
@@ -62,11 +64,30 @@ const pages: PageDefinition[] = [
 const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("Missing application root");
 
-const engine = new FlipbookEngine(app, {
-  pages,
-  initialPage: 0,
+async function startBook() {
+  const root = app!;
+  root.textContent = "Loading ALUFURN Catalogue…";
+  root.classList.add("catalogue-loading");
+  root.setAttribute("role", "status");
+  root.setAttribute("aria-busy", "true");
+  const demo = new URLSearchParams(location.search).get("demo") === "1";
+  const catalogue = demo ? null : await (await import("./pdf")).createPagesFromPdf(`${import.meta.env.BASE_URL}ALUFURN%20Catalogue.pdf`, {
+    workerSrc,
+    splitSpreads: true,
+    titlePrefix: "ALUFURN Catalogue",
+    section: "Catalogue",
+    scale: 3,
+    maxPixelRatio: 2
+  });
+  const firstPage = catalogue ? await catalogue.document.getPage(1) : null;
+  const dimensions = firstPage?.getViewport({ scale: 1 });
+  root.classList.remove("catalogue-loading");
+  root.removeAttribute("role");
+  const engine = new FlipbookEngine(root, {
+  pages: catalogue?.pages ?? pages,
+  initialPage: Math.max(0, (Number.parseInt(new URLSearchParams(location.search).get("page") ?? "1", 10) || 1) - 1),
   pageWidth: 720,
-  pageHeight: 1016,
+  pageHeight: dimensions ? 720 * dimensions.height / (dimensions.width / 2) : 1016,
   turnDuration: 600,
   autoplayInterval: 3000,
   spreadBreakpoint: 760,
@@ -76,3 +97,70 @@ const engine = new FlipbookEngine(app, {
 });
 
 Object.assign(window, { paperfold: engine });
+  const disposeZoom = catalogue ? enablePdfZoom(root, engine, catalogue.document) : () => {};
+  root.removeAttribute("aria-busy");
+  document.title = demo ? "Paperfold Flipbook Engine" : "ALUFURN Catalogue";
+  if (!demo) {
+    const toolbar = root.querySelector(".flipbook-controls")!;
+    const more = toolbar.querySelector(".flipbook-more");
+    const icon = (path: string) => `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
+    const notice = document.createElement("div");
+    notice.className = "catalogue-notice";
+    notice.setAttribute("role", "status");
+    root.querySelector(".flipbook-viewport")!.append(notice);
+    let noticeTimer: ReturnType<typeof setTimeout>;
+    const notify = (message: string) => {
+      clearTimeout(noticeTimer);
+      notice.textContent = message;
+      notice.classList.add("is-visible");
+      noticeTimer = setTimeout(() => notice.classList.remove("is-visible"), 4500);
+    };
+    const share = document.createElement("button");
+    share.type = "button";
+    share.className = "flipbook-button catalogue-share";
+    share.title = "Share this page";
+    share.setAttribute("aria-label", "Share this page");
+    share.innerHTML = icon("M12 16V3m-4 4 4-4 4 4M5 12v8h14v-8");
+    share.addEventListener("click", async () => {
+      const url = new URL(location.href);
+      url.searchParams.set("page", String(engine.snapshot.currentPage + 1));
+      const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+      try {
+        if (navigator.share && !local) await navigator.share({ title: "ALUFURN Catalogue", url: url.href });
+        else {
+          await navigator.clipboard.writeText(url.href);
+          notify(local ? "Link copied — this preview link works only on this computer." : "Link to this page copied");
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+        window.prompt("Copy this catalogue page link:", url.href);
+      }
+    });
+    const download = document.createElement("a");
+    download.className = "flipbook-button catalogue-download";
+    download.href = `${import.meta.env.BASE_URL}ALUFURN%20Catalogue.pdf`;
+    download.download = "ALUFURN Catalogue.pdf";
+    download.title = "Download PDF";
+    download.setAttribute("aria-label", "Download PDF");
+    download.innerHTML = icon("M12 3v12m-4-4 4 4 4-4M5 16v5h14v-5");
+    toolbar.insertBefore(share, more);
+    toolbar.insertBefore(download, more);
+    if (import.meta.hot) import.meta.hot.dispose(() => clearTimeout(noticeTimer));
+  }
+  if (import.meta.hot) import.meta.hot.dispose(() => {
+    disposeZoom();
+    engine.destroy();
+    if (catalogue) void catalogue.destroy();
+  });
+}
+
+void startBook().catch((error) => {
+  console.error("Catalogue loading failed", error);
+  app.removeAttribute("aria-busy");
+  app.textContent = "Unable to load ALUFURN Catalogue. ";
+  const retry = document.createElement("button");
+  retry.textContent = "Try again";
+  retry.addEventListener("click", () => location.reload());
+  app.append(retry);
+  app.setAttribute("role", "alert");
+});

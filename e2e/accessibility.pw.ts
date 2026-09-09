@@ -4,7 +4,7 @@ const snapshot = (page: import("@playwright/test").Page) =>
   page.evaluate(() => (window as any).paperfold.snapshot);
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?demo=1");
   await expect.poll(() => snapshot(page)).toMatchObject({ currentPage: 0, phase: "idle" });
 });
 
@@ -32,7 +32,7 @@ test("keyboard navigation, labels, live status, and focus remain available", asy
   await expect(next).toHaveCSS("outline-width", "3px");
 });
 
-test("reduced motion completes a programmatic turn without a long transition", async ({ page }) => {
+test("button turns retain the requested visible fold with reduced motion enabled", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.reload();
   await expect.poll(() => snapshot(page)).toMatchObject({ currentPage: 0, phase: "idle" });
@@ -48,5 +48,6 @@ test("reduced motion completes a programmatic turn without a long transition", a
     });
     (document.querySelector('[aria-label="Next page"]') as HTMLButtonElement).click();
   }));
-  expect(transitionDuration).toBeLessThan(225);
+  expect(transitionDuration).toBeGreaterThanOrEqual(500);
+  expect(transitionDuration).toBeLessThan(1200);
 });

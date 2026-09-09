@@ -23,7 +23,7 @@ test.describe("mobile performance profile", () => {
       await client.send("Emulation.setCPUThrottlingRate", { rate: 4 });
     }
 
-    await page.goto("/");
+    await page.goto("/?demo=1");
     await expect.poll(() => page.evaluate(() => (window as any).paperfold.snapshot)).toMatchObject({
       currentPage: 0,
       displayMode: "single",

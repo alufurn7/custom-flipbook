@@ -11,6 +11,11 @@ npm run dev
 
 Open the local URL, then drag from any outer corner or side edge. The engine instance is also exposed as `window.paperfold` for demo inspection.
 
+The default book is `public/ALUFURN Catalogue.pdf`. Its first PDF sheet contains
+the back/front cover; spread splitting produces 36 reading pages. Open `/?demo=1`
+for the original HTML sample. PDF rendering runs at most two jobs concurrently,
+with an 8-megapixel canvas limit per page and a bounded nearby-page cache.
+
 ## Install as a library
 
 Build the installable ESM package and its TypeScript declarations:
@@ -26,7 +31,7 @@ import { FlipbookEngine, type PageDefinition } from "paperfold-flipbook";
 import "paperfold-flipbook/styles.css";
 
 const engine = new FlipbookEngine(document.querySelector("#app")!, {
-  pages: [] satisfies PageDefinition[]
+  pages: [{ title: "Cover", section: "Book", render: () => document.createElement("div") }] satisfies PageDefinition[]
 });
 ```
 

@@ -11,7 +11,7 @@ every page. Publication content remains the integrator's responsibility.
 - Page shells labeled with page number and title.
 - Polite live announcements after visible-page changes.
 - Visible `:focus-visible` outlines.
-- Reduced-motion release animations.
+- Reduced-motion styling for decorative CSS transitions.
 - Pointer cancellation and lost-capture recovery.
 - Controls that do not require dragging, sound, or fullscreen.
 
@@ -51,7 +51,8 @@ content or an accessible PDF viewer alongside it when required.
 
 ## Motion, zoom, and sound
 
-`prefers-reduced-motion: reduce` shortens animations. Zoom ranges from 1x to 4x
+The catalogue retains visible page folds as configured, including with reduced
+motion enabled; decorative CSS transitions are shortened. Zoom ranges from 1x to 4x
 and enables panning above 1x. Turn sound is optional and muteable. Do not disable
 browser zoom or operating-system magnification in the host page.
 

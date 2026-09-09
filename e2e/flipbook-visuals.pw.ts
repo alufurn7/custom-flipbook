@@ -24,7 +24,7 @@ const expectVisual = async (page: Page, name: string) => {
 };
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?demo=1");
   await expect.poll(() => engineSnapshot(page)).toMatchObject({ currentPage: 0, phase: "idle" });
 });
 

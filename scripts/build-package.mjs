@@ -15,6 +15,7 @@ await build({
   root: projectRoot,
   logLevel: "info",
   build: {
+    copyPublicDir: false,
     outDir: outputDirectory,
     emptyOutDir: false,
     lib: {

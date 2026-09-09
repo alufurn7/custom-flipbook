@@ -8,7 +8,6 @@ import {
 } from "../geometry/foldGeometry";
 import {
   ANIMATION_CALIBRATION,
-  easeInOutCubic,
   easeOutSine,
   INTERACTION_CALIBRATION,
   SHADOW_CALIBRATION
@@ -85,6 +84,7 @@ export class FlipbookEngine {
   private audioContext: AudioContext | null = null;
 
   constructor(root: HTMLElement, input: FlipbookOptions) {
+    if (!input.pages.length) throw new Error("A flipbook requires at least one page.");
     this.root = root;
     this.pages = input.pages;
     const preloadRadius = Math.max(0, Math.floor(input.preloadRadius ?? 3));
@@ -133,6 +133,7 @@ export class FlipbookEngine {
   }
 
   goToPage(page: number): void {
+    if (!Number.isFinite(page)) return;
     if (this.phase !== "idle") return;
     const target = clamp(Math.round(page), 0, this.pages.length - 1);
     this.currentPage = this.displayMode === "spread" && target > 0 && target < this.pages.length - 1
@@ -142,6 +143,7 @@ export class FlipbookEngine {
   }
 
   setZoom(value: number): void {
+    if (!Number.isFinite(value)) return;
     this.zoom = clamp(value, 1, 4);
     if (this.zoom === 1) this.pan = { x: 0, y: 0 };
     this.applyBookTransform();
@@ -169,6 +171,7 @@ export class FlipbookEngine {
     if (this.animationFrame !== null) cancelAnimationFrame(this.animationFrame);
     if (this.dragFrame !== null) cancelAnimationFrame(this.dragFrame);
     this.resizeObserver.disconnect();
+    if (this.audioContext) void this.audioContext.close().catch(() => {});
     for (const [index, content] of this.pageCache) this.pages[index].dispose?.(content);
     this.pageCache.clear();
     this.listeners.clear();
@@ -185,11 +188,23 @@ export class FlipbookEngine {
     this.live.className = "sr-only flipbook-live";
     this.toc.setAttribute("aria-label", "Table of contents");
     this.toc.setAttribute("aria-hidden", "true");
+    this.toc.inert = true;
+    this.controls.setAttribute("aria-label", "Book controls");
     this.book.append(this.baseLayer, this.overlayLayer, this.thicknessLeft, this.thicknessRight, this.spine);
     this.stage.append(this.book);
     this.viewport.append(this.stage, this.toc, this.controls, this.live);
     this.root.replaceChildren(this.viewport);
     this.buildControls();
+    for (const side of ["left", "right"] as const) {
+      const arrow = create("button", `flipbook-edge-nav flipbook-edge-nav-${side}`);
+      arrow.type = "button";
+      const label = side === "left" ? "Previous page" : "Next page";
+      arrow.setAttribute("aria-label", side === "left" ? "Turn backward" : "Turn forward");
+      arrow.title = label;
+      arrow.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="${side === "left" ? "M15 5l-7 7 7 7" : "M9 5l7 7-7 7"}"/></svg>`;
+      arrow.addEventListener("click", () => side === "left" ? this.previous() : this.next());
+      this.viewport.append(arrow);
+    }
     this.buildToc();
     this.bindEvents();
     this.resizeObserver.observe(this.root);
@@ -202,7 +217,14 @@ export class FlipbookEngine {
       button.type = "button";
       button.setAttribute("aria-label", label);
       button.title = label;
-      button.innerHTML = `<span aria-hidden="true">${symbol}</span>`;
+      const paths: Record<string, string> = {
+        "☰": "M4 6h16M4 12h16M4 18h16", "‹": "M14 5l-7 7 7 7", "›": "M10 5l7 7-7 7",
+        "⛶": "M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5",
+        "−": "M5 12h14", "+": "M5 12h14M12 5v14"
+      };
+      button.innerHTML = paths[symbol]
+        ? `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[symbol]}"/></svg>`
+        : `<span aria-hidden="true">${symbol}</span>`;
       button.addEventListener("click", action);
       return button;
     };
@@ -214,8 +236,12 @@ export class FlipbookEngine {
     const extras = create("div", "flipbook-extra-controls");
     more.append(toggle, extras);
     more.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") { more.open = false; toggle.focus(); }
+      if (event.key === "Escape") { event.stopPropagation(); more.open = false; toggle.focus(); }
     });
+    this.viewport.addEventListener("pointerdown", (event) => {
+      if (!more.contains(event.target as Node)) more.open = false;
+    });
+    this.pageInput.addEventListener("focus", () => this.pageInput.select());
     this.pageInput.type = "text";
     this.pageInput.inputMode = "numeric";
     this.pageInput.setAttribute("aria-label", "Page number");
@@ -237,10 +263,10 @@ export class FlipbookEngine {
       makeButton("Previous page", "‹", () => this.previous()),
       this.pageInput,
       makeButton("Next page", "›", () => this.next()),
-      makeButton("Fullscreen", "⛶", () => this.toggleFullscreen()),
       more
     );
     extras.append(
+      makeButton("Fullscreen", "⛶", () => this.toggleFullscreen()),
       makeButton("First page", "⇤", () => this.first()),
       makeButton("Last page", "⇥", () => this.last()),
       makeButton("Zoom out", "−", () => this.setZoom(this.zoom - 0.25)),
@@ -274,7 +300,11 @@ export class FlipbookEngine {
         const item = create("li");
         const button = create("button");
         button.type = "button";
-        button.innerHTML = `<span>${page.title}</span><small>${index + 1}</small>`;
+        const label = create("span");
+        label.textContent = page.title;
+        const number = create("small");
+        number.textContent = String(index + 1);
+        button.append(label, number);
         button.addEventListener("click", () => { this.goToPage(index); this.toggleToc(false); });
         item.append(button);
         list.append(item);
@@ -298,6 +328,7 @@ export class FlipbookEngine {
       if (this.phase === "panning") this.endPan();
     });
     this.viewport.addEventListener("keydown", (event) => {
+      if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select, [contenteditable=true]") && event.key !== "Escape") return;
       if (event.key === "ArrowRight") { event.preventDefault(); this.next(); }
       if (event.key === "ArrowLeft") { event.preventDefault(); this.previous(); }
       if (event.key === "Home") { event.preventDefault(); this.first(); }
@@ -313,6 +344,14 @@ export class FlipbookEngine {
   }
 
   private layout(): void {
+    // Stop callbacks that still refer to the previous page dimensions.
+    if (this.animationFrame !== null) cancelAnimationFrame(this.animationFrame);
+    this.animationFrame = null;
+    this.stopDragRender();
+    const capturedPointer = this.activePointer;
+    this.activePointer = null;
+    this.phase = "resizing";
+    if (capturedPointer !== null && this.book.hasPointerCapture(capturedPointer)) this.book.releasePointerCapture(capturedPointer);
     const rect = this.root.getBoundingClientRect();
     const nextMode: DisplayMode = rect.width >= this.options.spreadBreakpoint ? "spread" : "single";
     if (nextMode !== this.displayMode) {
@@ -322,7 +361,7 @@ export class FlipbookEngine {
       }
     }
     const availableWidth = Math.max(280, rect.width - 40);
-    const availableHeight = Math.max(320, rect.height - 104);
+    const availableHeight = Math.max(160, rect.height - 104);
     const spreadFactor = this.displayMode === "spread" ? 2 : 1;
     this.fitScale = Math.min(
       availableWidth / (this.options.pageWidth * spreadFactor),
@@ -337,13 +376,13 @@ export class FlipbookEngine {
     this.book.dataset.displayMode = this.displayMode;
     this.book.style.width = `${this.bookWidth}px`;
     this.book.style.height = `${this.pageHeight}px`;
-    this.phase = "resizing";
-    this.renderIdle();
     this.phase = "idle";
+    this.renderIdle();
     this.applyBookTransform();
   }
 
   private renderIdle(): void {
+    this.turnCenterOffset = null;
     this.overlayLayer.replaceChildren();
     this.baseLayer.replaceChildren();
     for (const index of this.visibleIndices(this.currentPage)) {
@@ -400,7 +439,13 @@ export class FlipbookEngine {
     const maximum = Math.min(this.pages.length - 1, this.currentPage + this.options.preloadRadius + 1);
     const protectedIndices = new Set<number>();
     for (let index = minimum; index <= maximum; index += 1) protectedIndices.add(index);
-    for (let index = minimum; index <= maximum; index += 1) this.getPageContent(index);
+    for (let index = minimum; index <= maximum; index += 1) {
+      if (!this.pageCache.has(index)) {
+        const content = this.pages[index].render();
+        content.classList.add("flipbook-page-content");
+        this.pageCache.set(index, content);
+      }
+    }
     const evictions = planCacheEvictions({
       cacheOrder: [...this.pageCache.keys()],
       protectedIndices,
@@ -414,6 +459,13 @@ export class FlipbookEngine {
   }
 
   private pointerDown(event: PointerEvent): void {
+    if (this.phase === "committing" || this.phase === "cancelling") {
+      const local = this.toLocal(event);
+      const edge = clamp(this.pageWidth * INTERACTION_CALIBRATION.edgeZoneRatio,
+        INTERACTION_CALIBRATION.edgeZoneMin, INTERACTION_CALIBRATION.edgeZoneMax);
+      if (local.x > edge && local.x < this.bookWidth - edge) return;
+      this.finishPendingTurn();
+    }
     if (this.phase !== "idle") return;
     const local = this.toLocal(event);
     if (this.zoom > 1) {
@@ -575,7 +627,14 @@ export class FlipbookEngine {
     stationaryClip.append(stationaryPage);
     const foldedClip = create("div", "flipbook-folded-clip");
     const reflectedSurface = create("div", "flipbook-reflected-surface");
-    const back = this.createPageShell(foldedBackIndex, side === "right" ? "right" : "left");
+    const back = this.displayMode === "single"
+      ? this.createPageShell(this.turningPageIndex(side), "single")
+      : this.createPageShell(foldedBackIndex, side === "right" ? "right" : "left");
+    if (this.displayMode === "single") {
+      back.classList.add("flipbook-page-show-through");
+      back.setAttribute("aria-hidden", "true");
+      back.inert = true;
+    }
     back.classList.add("flipbook-page-back");
     reflectedSurface.append(back);
     foldedClip.append(reflectedSurface);
@@ -593,6 +652,11 @@ export class FlipbookEngine {
 
   private renderFold(pointer: Point) {
     const geometry = this.calculateGeometry(pointer);
+    const turnProgress = clamp(Math.abs(this.origin.x - geometry.creasePoint.x) / this.pageWidth, 0, 1);
+    const startOffset = this.centerOffsetForPage(this.currentPage);
+    const endOffset = this.centerOffsetForPage(this.targetPage(this.activeSide));
+    this.turnCenterOffset = startOffset + (endOffset - startOffset) * turnProgress;
+    this.applyBookTransform();
     const stationary = this.overlayLayer.querySelector<HTMLElement>(".flipbook-stationary-clip");
     const folded = this.overlayLayer.querySelector<HTMLElement>(".flipbook-folded-clip");
     const reflected = this.overlayLayer.querySelector<HTMLElement>(".flipbook-reflected-surface");
@@ -658,7 +722,7 @@ export class FlipbookEngine {
       x: this.activeSide === "right" ? pageLeft - this.pageWidth : pageLeft + this.pageWidth * 2,
       y: this.origin.y
     } : this.origin;
-    const baseDuration = this.reducedMotion.matches ? 1 : this.options.turnDuration;
+    const baseDuration = this.options.turnDuration;
     const remaining = clamp(
       distance(start, destination) / (this.pageWidth * 1.35),
       ANIMATION_CALIBRATION.minimumRemainingRatio,
@@ -671,7 +735,6 @@ export class FlipbookEngine {
       this.animationFrame = null;
       if (commit) {
         this.currentPage = this.targetPage(this.activeSide);
-        this.playTurnSound();
       }
       this.phase = "idle";
       this.renderIdle();
@@ -679,7 +742,14 @@ export class FlipbookEngine {
 
     // Use the requested timing consistently for every drag release.
     if (!programmatic) {
-      const releaseDuration = this.options.turnDuration;
+      const velocity = this.releaseVelocity();
+      const delta = { x: destination.x - start.x, y: destination.y - start.y };
+      const travel = Math.hypot(delta.x, delta.y);
+      const towardLanding = travel > 0 ? (velocity.x * delta.x + velocity.y * delta.y) / travel : 0;
+      const releaseDuration = towardLanding >= INTERACTION_CALIBRATION.flickVelocityPxPerMs
+        ? clamp(travel / towardLanding, 90, 300)
+        : 300;
+      if (commit) this.playTurnSound(releaseDuration / 1000);
       const releaseFrame = (now: number) => {
         const t = clamp((now - started) / releaseDuration, 0, 1);
         // Move immediately, then continuously decelerate to zero at landing.
@@ -702,12 +772,13 @@ export class FlipbookEngine {
       return;
     }
 
+    if (commit) this.playTurnSound(duration / 1000);
     const frame = (now: number) => {
       const raw = clamp((now - started) / duration, 0, 1);
-      const eased = programmatic ? easeInOutCubic(raw) : easeOutSine(raw);
+      const eased = easeOutSine(raw);
       const arcDirection = this.activeBand === "top" ? 1 : this.activeBand === "bottom" ? -1 : 0;
       const releaseArc = commit
-        ? Math.sin(raw * Math.PI) * this.pageHeight * 0.035 * remaining * arcDirection
+        ? Math.sin(raw * Math.PI) * this.pageHeight * 0.12 * remaining * arcDirection
         : 0;
       const point = {
         x: start.x + (destination.x - start.x) * eased,
@@ -723,7 +794,19 @@ export class FlipbookEngine {
     this.animationFrame = requestAnimationFrame(frame);
   }
 
+  private finishPendingTurn(): void {
+    if (this.phase !== "committing" && this.phase !== "cancelling") return;
+    if (this.animationFrame !== null) cancelAnimationFrame(this.animationFrame);
+    this.animationFrame = null;
+    if (this.phase === "committing") {
+      this.currentPage = this.targetPage(this.activeSide);
+    }
+    this.phase = "idle";
+    this.renderIdle();
+  }
+
   private startProgrammaticTurn(side: Side): void {
+    this.finishPendingTurn();
     if (this.phase !== "idle" || !this.canTurn(side)) return;
     this.activeSide = side;
     this.activeBand = "bottom";
@@ -823,6 +906,10 @@ export class FlipbookEngine {
   }
 
   private updateControls(): void {
+    for (const side of ["left", "right"] as const) {
+      const arrow = this.viewport.querySelector<HTMLButtonElement>(`.flipbook-edge-nav-${side}`);
+      if (arrow) arrow.disabled = !this.canTurn(side);
+    }
     const visible = this.visibleIndices(this.currentPage).map((index) => index + 1);
     this.pageInput.value = visible.length > 1 ? `${visible[0]}–${visible[1]} / ${this.pages.length}` : `${visible[0]} / ${this.pages.length}`;
     this.progress.style.width = `${((this.currentPage + 1) / this.pages.length) * 100}%`;
@@ -844,8 +931,13 @@ export class FlipbookEngine {
 
   private toggleToc(force?: boolean): void {
     const open = force ?? !this.toc.classList.contains("is-open");
+    const restoreFocus = !open && this.toc.contains(document.activeElement);
     this.toc.classList.toggle("is-open", open);
     this.toc.setAttribute("aria-hidden", String(!open));
+    this.toc.inert = !open;
+    this.controls.querySelector(".toc-button")?.setAttribute("aria-expanded", String(open));
+    if (open) this.toc.querySelector<HTMLInputElement>("input")?.focus();
+    else if (restoreFocus) this.controls.querySelector<HTMLButtonElement>(".toc-button")?.focus();
   }
 
   private async toggleFullscreen(): Promise<void> {
@@ -858,6 +950,15 @@ export class FlipbookEngine {
     }
   }
 
+  private turnCenterOffset: number | null = null;
+
+  private centerOffsetForPage(page: number): number {
+    if (this.displayMode !== "spread") return 0;
+    if (page === 0) return -this.pageWidth / 2;
+    if (page === this.pages.length - 1) return this.pageWidth / 2;
+    return 0;
+  }
+
   private applyBookTransform(): void {
     if (this.zoom > 1) {
       const maxX = Math.max(0, (this.bookWidth * (this.zoom - 1)) / 2);
@@ -865,25 +966,56 @@ export class FlipbookEngine {
       this.pan.x = clamp(this.pan.x, -maxX, maxX);
       this.pan.y = clamp(this.pan.y, -maxY, maxY);
     }
-    this.book.style.transform = `translate(${this.pan.x}px, ${this.pan.y}px) scale(${this.zoom})`;
+    const centerOffset = this.turnCenterOffset ?? this.centerOffsetForPage(this.currentPage);
+    this.book.style.transform = `translate(${this.pan.x + centerOffset * this.zoom}px, ${this.pan.y}px) scale(${this.zoom})`;
   }
 
-  private playTurnSound(): void {
+  private playTurnSound(duration = 0.3): void {
     if (!this.soundEnabled) return;
     try {
       this.audioContext ??= new AudioContext();
       const context = this.audioContext;
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      oscillator.type = "triangle";
-      oscillator.frequency.setValueAtTime(170, context.currentTime);
-      oscillator.frequency.exponentialRampToValueAtTime(70, context.currentTime + 0.08);
-      gain.gain.setValueAtTime(0.0001, context.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.035, context.currentTime + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.1);
-      oscillator.connect(gain).connect(context.destination);
-      oscillator.start();
-      oscillator.stop(context.currentTime + 0.11);
+      if (context.state === "suspended") void context.resume().catch(() => {});
+      const now = context.currentTime;
+      const length = Math.max(0.09, duration);
+      // Filtered, irregular noise gives paper friction without a pitched beep.
+      const buffer = context.createBuffer(1, Math.ceil(context.sampleRate * (length + 0.12)), context.sampleRate);
+      const data = buffer.getChannelData(0);
+      let softened = 0;
+      for (let i = 0; i < data.length; i += 1) {
+        softened = softened * 0.55 + (Math.random() * 2 - 1) * 0.45;
+        const t = i / context.sampleRate;
+        const texture = 0.7 + 0.18 * Math.sin(t * 83) + 0.12 * Math.sin(t * 137);
+        data[i] = softened * texture;
+      }
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      const paper = context.createBiquadFilter();
+      paper.type = "bandpass";
+      paper.Q.value = 0.6;
+      paper.frequency.setValueAtTime(2400, now);
+      paper.frequency.exponentialRampToValueAtTime(750, now + length);
+      const rustle = context.createGain();
+      rustle.gain.setValueAtTime(0, now);
+      rustle.gain.linearRampToValueAtTime(0.16, now + length * 0.2);
+      rustle.gain.linearRampToValueAtTime(0.08, now + length * 0.65);
+      rustle.gain.linearRampToValueAtTime(0, now + length + 0.04);
+      const contact = context.createBiquadFilter();
+      contact.type = "lowpass";
+      contact.frequency.value = 380;
+      const landing = context.createGain();
+      landing.gain.setValueAtTime(0, now);
+      landing.gain.setValueAtTime(0, now + length * 0.86);
+      landing.gain.linearRampToValueAtTime(0.18, now + length);
+      landing.gain.exponentialRampToValueAtTime(0.0001, now + length + 0.1);
+      source.connect(paper).connect(rustle).connect(context.destination);
+      source.connect(contact).connect(landing).connect(context.destination);
+      source.onended = () => {
+        source.disconnect(); paper.disconnect(); rustle.disconnect();
+        contact.disconnect(); landing.disconnect();
+      };
+      source.start(now);
+      source.stop(now + length + 0.12);
     } catch {
       this.soundEnabled = false;
     }

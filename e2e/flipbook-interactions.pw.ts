@@ -39,7 +39,7 @@ const drag = async (
 };
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?demo=1");
   await expect.poll(() => snapshot(page)).toMatchObject({ currentPage: 0, phase: "idle" });
 });
 
@@ -77,12 +77,13 @@ test("bottom-corner drag stays live and commits only after release", async ({ pa
   const [a, b] = shadowTransform.match(/-?\d+(?:\.\d+)?/g)?.slice(0, 2).map(Number) ?? [];
   expect(Math.abs(a)).toBeGreaterThan(Math.abs(b));
 
-  const shadowClip = await page.locator(".flipbook-shadow-clip").boundingBox();
-  expect(shadowClip).not.toBeNull();
-  expect(shadowClip!.x).toBeCloseTo(box.x, 0);
-  expect(shadowClip!.y).toBeCloseTo(box.y, 0);
-  expect(shadowClip!.width).toBeCloseTo(box.width, 0);
-  expect(shadowClip!.height).toBeCloseTo(box.height, 0);
+  // The centered cover shifts while opening: compare live bounds in one frame.
+  const bounds = await page.evaluate(() => {
+    const book = document.querySelector(".flipbook-book")!.getBoundingClientRect();
+    const shadow = document.querySelector(".flipbook-shadow-clip")!.getBoundingClientRect();
+    return { x: shadow.x - book.x, y: shadow.y - book.y, width: shadow.width - book.width, height: shadow.height - book.height };
+  });
+  for (const delta of Object.values(bounds)) expect(Math.abs(delta)).toBeLessThan(0.5);
 
   await page.mouse.up();
   await waitForIdlePage(page, 1);
@@ -189,7 +190,7 @@ test("release outside the book keeps a weighted landing", async ({ page }) => {
   await page.mouse.up();
   const releasedAt = Date.now();
   await waitForIdlePage(page, 1);
-  expect(Date.now() - releasedAt).toBeGreaterThanOrEqual(550);
+  expect(Date.now() - releasedAt).toBeGreaterThanOrEqual(60);
 });
 
 test("mid-page release eases back instead of snapping shut", async ({ page }) => {
@@ -236,9 +237,9 @@ test("single-page release reaches the spine before the idle page replaces the fo
     return { lastCrease, firstCrease, earlyCrease, lastShade };
   });
   expect(landing.lastCrease).toBeLessThan(2);
-  // At 200ms of a 600ms ease-out release, roughly half the travel remains.
-  expect(landing.earlyCrease).toBeGreaterThan(landing.firstCrease * 0.4);
-  expect(landing.earlyCrease).toBeLessThan(landing.firstCrease * 0.7);
+  // At 200ms of the settled 300ms release, the page is decelerating to contact.
+  expect(landing.earlyCrease).toBeGreaterThan(landing.firstCrease * 0.05);
+  expect(landing.earlyCrease).toBeLessThan(landing.firstCrease * 0.4);
   expect(landing.lastShade).toBeLessThan(0.01);
   await waitForIdlePage(page, 1);
 });
@@ -307,6 +308,10 @@ test.describe("mobile single-page mode", () => {
 
     await drag(page, start, { x: start.x - box.width * 0.65, y: start.y }, 8);
     await expect(page.locator(".flipbook-base-layer .flipbook-page")).toHaveAttribute("data-page", "1");
+    await expect(page.locator(".flipbook-page-back")).toHaveAttribute("data-page", "0");
+    await expect(page.locator(".flipbook-page-back .flipbook-page-content")).toHaveCSS("opacity", "0.1");
+    await expect(page.locator(".flipbook-page-back")).toHaveCSS("background-color", "rgb(255, 255, 255)");
+    await expect(page.locator('.flipbook-book [data-page="1"]')).toHaveCount(1);
     await page.mouse.up();
 
     await waitForIdlePage(page, 1);

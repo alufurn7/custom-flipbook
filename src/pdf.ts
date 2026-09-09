@@ -10,6 +10,8 @@ export type PdfDocumentParameters = NonNullable<Parameters<typeof getDocument>[0
 export type PdfSource = string | URL | Uint8Array | ArrayBuffer | PdfDocumentParameters;
 
 export interface PdfAdapterOptions {
+  /** Split spread PDFs whose first sheet contains back cover (left) and front cover (right). */
+  splitSpreads?: boolean;
   workerSrc?: string;
   scale?: number;
   maxPixelRatio?: number;
@@ -46,30 +48,63 @@ export const createPagesFromPdf = async (
   const scale = Math.max(0.25, options.scale ?? 1.5);
   const maxPixelRatio = Math.max(1, options.maxPixelRatio ?? 2);
   const objectUrls = new Set<string>();
+  let destroyed = false;
+  let activeRenders = 0;
+  const waiting: Array<() => void> = [];
+  const acquireRender = async () => {
+    if (activeRenders >= 2) await new Promise<void>((resolve) => waiting.push(resolve));
+    else activeRenders += 1;
+  };
+  const releaseRender = () => {
+    const next = waiting.shift();
+    if (next) next();
+    else activeRenders -= 1;
+  };
 
-  const pages: PageDefinition[] = Array.from({ length: pdf.numPages }, (_, index) => {
-    const pageNumber = index + 1;
+  const pageCount = options.splitSpreads ? pdf.numPages * 2 : pdf.numPages;
+  const pages: PageDefinition[] = Array.from({ length: pageCount }, (_, index) => {
+    const pageNumber = options.splitSpreads
+      ? (index === 0 || index === pageCount - 1 ? 1 : Math.floor((index + 1) / 2) + 1)
+      : index + 1;
+    const rightHalf = options.splitSpreads && (index === 0 || (index < pageCount - 1 && index % 2 === 0));
     let imageUrl: string | null = null;
+    let readyImage: HTMLImageElement | null = null;
     let renderPromise: Promise<string> | null = null;
+    let generation = 0;
 
     const renderImage = (): Promise<string> => {
       if (imageUrl) return Promise.resolve(imageUrl);
       if (renderPromise) return renderPromise;
+      const version = generation;
       renderPromise = (async () => {
+        await acquireRender();
+        try {
+        if (destroyed || version !== generation) throw new Error("PDF render cancelled");
         const page = await pdf.getPage(pageNumber);
         const pixelRatio = Math.min(window.devicePixelRatio || 1, maxPixelRatio);
-        const viewport = page.getViewport({ scale: scale * pixelRatio });
+        let viewport = page.getViewport({ scale: scale * pixelRatio });
+        const pixels = viewport.width * viewport.height / (options.splitSpreads ? 2 : 1);
+        // Keep high-DPI pages sharp without allocating enormous mobile canvases.
+        if (pixels > 8_000_000) {
+          const cappedScale = scale * pixelRatio * Math.sqrt(8_000_000 / pixels);
+          viewport = page.getViewport({ scale: cappedScale >= 1 ? Math.floor(cappedScale) : cappedScale });
+        }
         const canvas = document.createElement("canvas");
-        canvas.width = Math.ceil(viewport.width);
+        canvas.width = Math.ceil(viewport.width / (options.splitSpreads ? 2 : 1));
         canvas.height = Math.ceil(viewport.height);
-        await page.render({ canvas, viewport }).promise;
+        await page.render({ canvas, viewport,
+          transform: rightHalf ? [1, 0, 0, 1, -viewport.width / 2, 0] : undefined
+        }).promise;
         const blob = await canvasToBlob(canvas);
+        canvas.width = canvas.height = 0;
+        if (destroyed || version !== generation) throw new Error("PDF render cancelled");
         imageUrl = URL.createObjectURL(blob);
         objectUrls.add(imageUrl);
         page.cleanup();
         return imageUrl;
+        } finally { releaseRender(); }
       })().catch((error) => {
-        renderPromise = null;
+        if (version === generation) renderPromise = null;
         throw error;
       });
       return renderPromise;
@@ -77,18 +112,25 @@ export const createPagesFromPdf = async (
 
     const createPage = (): HTMLElement => {
       const figure = document.createElement("figure");
-      figure.className = ["paperfold-pdf-page", options.pageClassName].filter(Boolean).join(" ");
-      figure.setAttribute("aria-busy", imageUrl ? "false" : "true");
-      const image = document.createElement("img");
-      image.alt = `${options.titlePrefix ?? "PDF"} page ${pageNumber}`;
+      figure.className = ["paperfold-pdf-page", "flipbook-page-content", options.pageClassName].filter(Boolean).join(" ");
+      const cachedImage = readyImage;
+      figure.setAttribute("aria-busy", cachedImage ? "false" : "true");
+      const image = cachedImage ? cachedImage.cloneNode() as HTMLImageElement : document.createElement("img");
+      image.alt = `${options.titlePrefix ?? "PDF"} page ${index + 1}`;
       image.draggable = false;
+      // Cached clones share the decoded resource and paint in the same frame.
+      image.decoding = cachedImage ? "sync" : "async";
       figure.append(image);
-      const showImage = (url: string) => {
+      if (cachedImage) return figure;
+      const version = generation;
+      const showImage = async (url: string) => {
         image.src = url;
+        if (image.decode) await image.decode();
+        if (destroyed || version !== generation) return;
+        readyImage = image;
         figure.setAttribute("aria-busy", "false");
       };
-      if (imageUrl) showImage(imageUrl);
-      else void renderImage().then(showImage).catch(() => {
+      void (imageUrl ? Promise.resolve(imageUrl) : renderImage()).then(showImage).catch(() => {
         figure.classList.add("is-error");
         figure.setAttribute("aria-busy", "false");
         figure.append(appendError("Unable to render this PDF page."));
@@ -97,11 +139,13 @@ export const createPagesFromPdf = async (
     };
 
     return {
-      title: `${options.titlePrefix ?? "PDF"} page ${pageNumber}`,
+      title: `${options.titlePrefix ?? "PDF"} page ${index + 1}`,
       section: options.section ?? "PDF",
       render: createPage,
       clone: () => createPage(),
       dispose: () => {
+        generation += 1;
+        readyImage = null;
         if (imageUrl) {
           URL.revokeObjectURL(imageUrl);
           objectUrls.delete(imageUrl);
@@ -115,8 +159,9 @@ export const createPagesFromPdf = async (
   return {
     document: pdf,
     pages,
-    pageCount: pdf.numPages,
+    pageCount,
     async destroy() {
+      destroyed = true;
       for (const url of objectUrls) URL.revokeObjectURL(url);
       objectUrls.clear();
       await loadingTask.destroy();

@@ -9,6 +9,8 @@
 html, body, #app { width: 100%; height: 100%; margin: 0; }
 button, input { font: inherit; }
 button { color: inherit; }
+.catalogue-loading { display: grid; place-content: center; gap: 16px; text-align: center; color: #17313a; }
+.catalogue-loading button { padding: 10px 18px; border: 1px solid #bfc9c3; border-radius: 8px; background: #fff; cursor: pointer; }
 
 /* paperfold-package:start */
 .paperfold-app,
@@ -30,7 +32,7 @@ button { color: inherit; }
   --paperfold-toc-color: #fff;
   width: 100%;
   height: 100%;
-  min-height: 620px;
+  min-height: 320px;
 }
 .flipbook-viewport {
   position: relative;
@@ -69,6 +71,28 @@ button { color: inherit; }
   filter: drop-shadow(0 16px 22px rgba(29, 37, 43, .22));
 }
 .flipbook-book.is-panning { cursor: grabbing; }
+.flipbook-edge-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 52px;
+  padding: 0;
+  border: 1px solid rgba(35,54,60,.08);
+  border-radius: 10px;
+  background: var(--paperfold-controls-background);
+  color: var(--paperfold-controls-color);
+  box-shadow: 0 2px 10px rgba(28,36,40,.08);
+  cursor: pointer;
+}
+.flipbook-edge-nav-left { left: 8px; }
+.flipbook-edge-nav-right { right: 8px; }
+.flipbook-edge-nav:hover:not(:disabled) { background: #fff; }
+.flipbook-edge-nav:disabled { opacity: .2; cursor: default; }
+.flipbook-edge-nav:focus-visible { outline: 3px solid var(--paperfold-focus); outline-offset: 2px; }
 .flipbook-base-layer,
 .flipbook-overlay-layer,
 .flipbook-stationary-clip,
@@ -106,6 +130,8 @@ button { color: inherit; }
 .flipbook-page-left { left: 0; }
 .flipbook-page-right { right: 0; }
 .flipbook-page-single { left: 0; }
+.flipbook-page-show-through { background: #fff; }
+.flipbook-page-show-through > .flipbook-page-content { opacity: .1; }
 .flipbook-book[data-display-mode="spread"] .flipbook-page-left { border-right: 0; }
 .flipbook-book[data-display-mode="spread"] .flipbook-page-right { border-left: 0; }
 .flipbook-page-back {
@@ -232,20 +258,22 @@ button { color: inherit; }
   align-items: center;
   gap: 2px;
   max-width: calc(100% - 28px);
-  padding: 5px 8px;
+  padding: 5px 7px;
   border: 1px solid rgba(35,54,60,.08);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--paperfold-controls-background);
   color: var(--paperfold-controls-color);
-  box-shadow: 0 4px 16px rgba(28,36,40,.08);
+  box-shadow: 0 8px 28px rgba(28,36,40,.1), inset 0 1px rgba(255,255,255,.8);
   backdrop-filter: blur(18px);
 }
 .flipbook-button {
+  text-decoration: none;
+  flex-shrink: 0;
   display: grid;
   place-items: center;
-  min-width: 38px;
+  min-width: 36px;
   height: 38px;
-  padding: 0 10px;
+  padding: 0 8px;
   border: 0;
   border-radius: 10px;
   background: transparent;
@@ -255,6 +283,10 @@ button { color: inherit; }
   font-size: 18px;
 }
 .flipbook-button:hover { background: rgba(34, 72, 84, .1); }
+.flipbook-button:active { background: rgba(34, 72, 84, .17); }
+.catalogue-share { margin-left: 5px; border-left: 1px solid rgba(35,54,60,.1); border-radius: 0 8px 8px 0; }
+.catalogue-notice { position: absolute; z-index: 130; bottom: 84px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 10px; color: #fff; background: #173b31; box-shadow: 0 4px 16px #0002; font-size: 13px; text-align: center; opacity: 0; pointer-events: none; }
+.catalogue-notice.is-visible { opacity: 1; }
 .flipbook-button:focus-visible,
 .flipbook-page-input:focus-visible,
 .flipbook-toc button:focus-visible,
@@ -362,18 +394,29 @@ button { color: inherit; }
 .paperfold-json-page cite { display: block; margin-top: .75em; opacity: .7; }
 
 .paperfold-pdf-page {
+  position: relative;
   display: grid;
   place-items: center;
   margin: 0;
   background: #fff;
 }
-.paperfold-pdf-page img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.paperfold-pdf-page[aria-busy="true"]::after {
+  content: "Loading page…";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #fafaf7;
+  color: #607168;
+  font: 14px system-ui, sans-serif;
+}
+.paperfold-pdf-page img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: contain; }
 .paperfold-pdf-page.is-error { padding: 2rem; color: #8d251f; text-align: center; }
 /* paperfold-package:end */
 
 /* paperfold-package:start */
 @media (max-width: 760px) {
-  .paperfold-app { min-height: 520px; }
+  .paperfold-app { min-height: 320px; }
   .flipbook-stage { inset: 12px 10px 80px; }
   .flipbook-controls { gap: 2px; padding: 6px; }
   .flipbook-button { min-width: 34px; height: 36px; padding: 0 7px; }
