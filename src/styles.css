@@ -205,6 +205,10 @@ button {
   will-change: clip-path;
 }
 
+.flipbook-folded-clip {
+  isolation: isolate;
+}
+
 .flipbook-reflected-surface {
   transform-origin: 0 0;
   will-change: transform;
@@ -249,6 +253,52 @@ button {
 
 .flipbook-book[data-display-mode="spread"] .flipbook-page-right {
   border-left: 0;
+}
+
+/* Page edge binding shadow: sticks with pages during turn and disappears when settled */
+.flipbook-book[data-display-mode="spread"] .flipbook-page-left::before,
+.flipbook-book[data-display-mode="spread"] .flipbook-page-right::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: clamp(48px, 11%, 80px);
+  pointer-events: none;
+  z-index: 6;
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+}
+
+.flipbook-book[data-display-mode="spread"].is-turning .flipbook-page-left::before,
+.flipbook-book[data-display-mode="spread"].is-turning .flipbook-page-right::before {
+  opacity: var(--page-edge-shadow-opacity, 0);
+  transition: none;
+}
+
+.flipbook-book[data-display-mode="spread"] .flipbook-page-left::before {
+  right: 0;
+  background: linear-gradient(to left,
+    rgba(12, 16, 19, 0.38) 0%,
+    rgba(12, 16, 19, 0.30) 3.5%,
+    rgba(12, 16, 19, 0.20) 11%,
+    rgba(12, 16, 19, 0.11) 24%,
+    rgba(12, 16, 19, 0.05) 45%,
+    rgba(12, 16, 19, 0.015) 70%,
+    transparent 100%
+  );
+}
+
+.flipbook-book[data-display-mode="spread"] .flipbook-page-right::before {
+  left: 0;
+  background: linear-gradient(to right,
+    rgba(12, 16, 19, 0.38) 0%,
+    rgba(12, 16, 19, 0.30) 3.5%,
+    rgba(12, 16, 19, 0.20) 11%,
+    rgba(12, 16, 19, 0.11) 24%,
+    rgba(12, 16, 19, 0.05) 45%,
+    rgba(12, 16, 19, 0.015) 70%,
+    transparent 100%
+  );
 }
 
 .flipbook-page-back {
@@ -891,53 +941,4 @@ button {
   .magazine-page {
     padding: 32px;
   }
-}
-
-background-color: #f6f1e8;
-background-image: linear-gradient(rgba(25, 70, 77, .08) 1px, transparent 1px),
-linear-gradient(90deg, rgba(25, 70, 77, .08) 1px, transparent 1px);
-background-size: 32px 32px;
-}
-
-.magazine-page .stat-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 14px;
-  margin-top: auto;
-}
-
-.magazine-page .stat {
-  padding: 18px;
-  border: 1px solid currentColor;
-  border-radius: 14px;
-}
-
-.magazine-page .stat strong {
-  display: block;
-  font-size: clamp(28px, 4vw, 54px);
-}
-
-.magazine-page .quote {
-  margin: auto 0;
-  font-size: clamp(25px, 4.8vw, 60px);
-  font-weight: 750;
-  line-height: 1.08;
-}
-
-.magazine-page .columns {
-  columns: 2;
-  column-gap: 28px;
-  margin-top: 24px;
-}
-
-@media (max-width: 760px) {
-  .magazine-page {
-    padding: 32px;
-  }
-}
-
-@media (max-width: 760px) {
-  .magazine-page {
-    padding: 32px;
-  }
-}
+}

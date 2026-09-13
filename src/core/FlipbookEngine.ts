@@ -423,6 +423,8 @@ export class FlipbookEngine {
 
   private renderIdle(): void {
     this.turnCenterOffset = null;
+    this.book.classList.remove("is-turning");
+    this.book.style.setProperty("--page-edge-shadow-opacity", "0");
     this.overlayLayer.replaceChildren();
     this.baseLayer.replaceChildren();
     for (const index of this.visibleIndices(this.currentPage)) {
@@ -637,11 +639,14 @@ export class FlipbookEngine {
     this.activePointer = null;
     this.phase = "idle";
     this.book.classList.remove("is-panning");
+    this.book.classList.remove("is-turning");
     this.applyBookTransform();
     this.emit();
   }
 
   private prepareTurnLayers(side: Side): void {
+    this.book.classList.add("is-turning");
+    this.book.style.setProperty("--page-edge-shadow-opacity", "0");
     this.overlayLayer.replaceChildren();
     const target = this.targetPage(side);
     const currentIndices = this.visibleIndices(this.currentPage);
@@ -719,6 +724,8 @@ export class FlipbookEngine {
       shadow.style.transform = `translate(${geometry.creasePoint.x}px, ${geometry.creasePoint.y}px) rotate(${geometry.angle}rad) translate(-50%, -50%)`;
     }
     const lightingWave = geometry.shadowOpacity / (SHADOW_CALIBRATION.opacityBase + SHADOW_CALIBRATION.opacityRange);
+    const edgeShadowOpacity = Math.pow(lightingWave, 0.7);
+    this.book.style.setProperty("--page-edge-shadow-opacity", `${edgeShadowOpacity}`);
     if (shade) shade.style.opacity = `${lightingWave * 0.24}`;
     if (back) {
       back.style.setProperty("--fold-light", `${lightingWave}`);
