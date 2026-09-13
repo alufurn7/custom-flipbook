@@ -34,6 +34,21 @@ const create = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: strin
   return element;
 };
 
+const NAVBAR_ICONS: Record<string, string> = {
+  zoom: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>`,
+  toc: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1.5" fill="currentColor"/><circle cx="4" cy="12" r="1.5" fill="currentColor"/><circle cx="4" cy="18" r="1.5" fill="currentColor"/></svg>`,
+  play: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor"/></svg>`,
+  pause: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="10" y1="9" x2="10" y2="15" stroke-width="2"/><line x1="14" y1="9" x2="14" y2="15" stroke-width="2"/></svg>`,
+  first: `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><polygon points="11 5 2 12 11 19 11 5"/><polygon points="20 5 11 12 20 19 20 5"/></svg>`,
+  prev: `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><polygon points="16 5 6 12 16 19 16 5"/></svg>`,
+  next: `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><polygon points="8 5 18 12 8 19 8 5"/></svg>`,
+  last: `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><polygon points="4 5 13 12 4 19 4 5"/><polygon points="13 5 22 12 13 19 13 5"/></svg>`,
+  sound: `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18.07 5.93a8.5 8.5 0 0 1 0 12.14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+  soundMuted: `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="22" y1="9" x2="16" y2="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="16" y1="9" x2="22" y2="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+  share: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3" fill="currentColor"/><circle cx="6" cy="12" r="3" fill="currentColor"/><circle cx="18" cy="19" r="3" fill="currentColor"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`,
+  fullscreen: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>`
+};
+
 export class FlipbookEngine {
   private readonly root: HTMLElement;
   private readonly pages: PageDefinition[];
@@ -52,6 +67,10 @@ export class FlipbookEngine {
   private thicknessRight = create("div", "flipbook-thickness flipbook-thickness-right");
   private spine = create("div", "flipbook-spine");
   private controls = create("nav", "flipbook-controls");
+  private brand = create("div", "flipbook-brand");
+  private controlsGroup = create("div", "flipbook-controls-group");
+  private notice = create("div", "flipbook-notice");
+  private noticeTimer: number | null = null;
   private toc = create("aside", "flipbook-toc");
   private live = create("div", "flipbook-live");
   private pageInput = create("input", "flipbook-page-input");
@@ -101,6 +120,7 @@ export class FlipbookEngine {
       preloadRadius,
       curvature: input.curvature ?? "none",
       soundSrc: input.soundSrc ?? "pageflipFX.mp3",
+      logoSrc: input.logoSrc ?? "logo_gold.png",
       maxCachedPages: Math.max(
         minimumCacheSize,
         Math.floor(input.maxCachedPages ?? 10)
@@ -176,6 +196,7 @@ export class FlipbookEngine {
     if (this.dragFrame !== null) cancelAnimationFrame(this.dragFrame);
     this.resizeObserver.disconnect();
     if (this.audioContext) void this.audioContext.close().catch(() => { });
+    if (this.noticeTimer !== null) clearTimeout(this.noticeTimer);
     this.soundBuffer = null;
     this.soundDataPromise = null;
     for (const [index, content] of this.pageCache) this.pages[index].dispose?.(content);
@@ -198,7 +219,7 @@ export class FlipbookEngine {
     this.controls.setAttribute("aria-label", "Book controls");
     this.book.append(this.baseLayer, this.overlayLayer, this.thicknessLeft, this.thicknessRight, this.spine);
     this.stage.append(this.book);
-    this.viewport.append(this.stage, this.toc, this.controls, this.live);
+    this.viewport.append(this.stage, this.toc, this.controls, this.live, this.notice);
     this.root.replaceChildren(this.viewport);
     this.buildControls();
     for (const side of ["left", "right"] as const) {
@@ -207,7 +228,7 @@ export class FlipbookEngine {
       const label = side === "left" ? "Previous page" : "Next page";
       arrow.setAttribute("aria-label", side === "left" ? "Turn backward" : "Turn forward");
       arrow.title = label;
-      arrow.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="${side === "left" ? "M15 5l-7 7 7 7" : "M9 5l7 7-7 7"}"/></svg>`;
+      arrow.innerHTML = `<svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${side === "left" ? "M15 5l-7 7 7 7" : "M9 5l7 7-7 7"}"/></svg>`;
       arrow.addEventListener("click", () => side === "left" ? this.previous() : this.next());
       this.viewport.append(arrow);
     }
@@ -217,42 +238,56 @@ export class FlipbookEngine {
     this.layout();
   }
 
+  private notify(message: string): void {
+    if (this.noticeTimer !== null) clearTimeout(this.noticeTimer);
+    this.notice.textContent = message;
+    this.notice.classList.add("is-visible");
+    this.noticeTimer = window.setTimeout(() => this.notice.classList.remove("is-visible"), 3500);
+  }
+
+  private async share(): Promise<void> {
+    const url = new URL(location.href);
+    url.searchParams.set("page", String(this.currentPage + 1));
+    const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    try {
+      if (navigator.share && !local) {
+        await navigator.share({ title: document.title || "Flipbook", url: url.href });
+      } else {
+        await navigator.clipboard.writeText(url.href);
+        this.notify(local ? "Link copied — preview link works on this computer." : "Link to this page copied");
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+      window.prompt("Copy page link:", url.href);
+    }
+  }
+
   private buildControls(): void {
-    const makeButton = (label: string, symbol: string, action: () => void, className = "") => {
+    this.brand.replaceChildren();
+    this.controlsGroup.replaceChildren();
+
+    const logo = create("img", "flipbook-logo") as HTMLImageElement;
+    logo.src = this.options.logoSrc;
+    logo.alt = "Logo";
+    this.brand.append(logo);
+
+    const makeButton = (label: string, iconKey: string, action: () => void, className = "") => {
       const button = create("button", `flipbook-button ${className}`.trim());
       button.type = "button";
       button.setAttribute("aria-label", label);
       button.title = label;
-      const paths: Record<string, string> = {
-        "☰": "M4 6h16M4 12h16M4 18h16", "‹": "M14 5l-7 7 7 7", "›": "M10 5l7 7-7 7",
-        "⛶": "M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5",
-        "−": "M5 12h14", "+": "M5 12h14M12 5v14"
-      };
-      button.innerHTML = paths[symbol]
-        ? `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[symbol]}"/></svg>`
-        : `<span aria-hidden="true">${symbol}</span>`;
+      button.innerHTML = NAVBAR_ICONS[iconKey] ?? `<span aria-hidden="true">${iconKey}</span>`;
       button.addEventListener("click", action);
       return button;
     };
-    const more = create("details", "flipbook-more");
-    const toggle = create("summary", "flipbook-button");
-    toggle.setAttribute("aria-label", "More controls");
-    toggle.title = "More controls";
-    toggle.textContent = "⋯";
-    const extras = create("div", "flipbook-extra-controls");
-    more.append(toggle, extras);
-    more.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") { event.stopPropagation(); more.open = false; toggle.focus(); }
-    });
-    this.viewport.addEventListener("pointerdown", (event) => {
-      if (!more.contains(event.target as Node)) more.open = false;
-    });
+
     this.pageInput.addEventListener("focus", () => this.pageInput.select());
     this.pageInput.type = "text";
     this.pageInput.inputMode = "numeric";
     this.pageInput.setAttribute("aria-label", "Page number");
     const commitPageInput = () => {
-      const page = Number.parseInt(this.pageInput.value, 10);
+      const raw = this.pageInput.value.split(/[-–/]/)[0].trim();
+      const page = Number.parseInt(raw, 10);
       if (Number.isFinite(page)) this.goToPage(page - 1);
       else this.updateControls();
     };
@@ -264,23 +299,22 @@ export class FlipbookEngine {
         this.pageInput.select();
       }
     });
-    this.controls.append(
-      makeButton("Table of contents", "☰", () => this.toggleToc(), "toc-button"),
-      makeButton("Previous page", "‹", () => this.previous()),
+
+    this.controlsGroup.append(
+      makeButton("Zoom", "zoom", () => this.setZoom(this.zoom > 1 ? 1 : 1.75), "zoom-button"),
+      makeButton("Table of contents", "toc", () => this.toggleToc(), "toc-button"),
+      makeButton("Start autoplay", "play", () => this.autoplayTimer === null ? this.startAutoplay() : this.stopAutoplay(), "autoplay-button"),
+      makeButton("First page", "first", () => this.first(), "first-button"),
+      makeButton("Previous page", "prev", () => this.previous(), "prev-button"),
       this.pageInput,
-      makeButton("Next page", "›", () => this.next()),
-      more
+      makeButton("Next page", "next", () => this.next(), "next-button"),
+      makeButton("Last page", "last", () => this.last(), "last-button"),
+      makeButton("Toggle sound", "sound", () => { this.soundEnabled = !this.soundEnabled; this.updateControls(); }, "sound-button"),
+      makeButton("Share this page", "share", () => void this.share(), "share-button"),
+      makeButton("Fullscreen", "fullscreen", () => void this.toggleFullscreen(), "fullscreen-button")
     );
-    extras.append(
-      makeButton("Fullscreen", "⛶", () => this.toggleFullscreen()),
-      makeButton("First page", "⇤", () => this.first()),
-      makeButton("Last page", "⇥", () => this.last()),
-      makeButton("Zoom out", "−", () => this.setZoom(this.zoom - 0.25)),
-      makeButton("Zoom in", "+", () => this.setZoom(this.zoom + 0.25)),
-      makeButton("Reset view", "1:1", () => this.setZoom(1), "reset-button"),
-      makeButton("Start autoplay", "▶", () => this.autoplayTimer === null ? this.startAutoplay() : this.stopAutoplay(), "autoplay-button"),
-      makeButton("Toggle sound", "♪", () => { this.soundEnabled = !this.soundEnabled; this.updateControls(); }, "sound-button")
-    );
+
+    this.controls.replaceChildren(this.brand, this.controlsGroup);
   }
 
   private buildToc(): void {
@@ -366,8 +400,8 @@ export class FlipbookEngine {
         this.currentPage = this.currentPage % 2 === 0 ? this.currentPage - 1 : this.currentPage;
       }
     }
-    const availableWidth = Math.max(280, rect.width - 40);
-    const availableHeight = Math.max(160, rect.height - 104);
+    const availableWidth = Math.max(280, rect.width - 48);
+    const availableHeight = Math.max(160, rect.height - 62);
     const spreadFactor = this.displayMode === "spread" ? 2 : 1;
     this.fitScale = Math.min(
       availableWidth / (this.options.pageWidth * spreadFactor),
@@ -917,13 +951,23 @@ export class FlipbookEngine {
       const arrow = this.viewport.querySelector<HTMLButtonElement>(`.flipbook-edge-nav-${side}`);
       if (arrow) arrow.disabled = !this.canTurn(side);
     }
+    const firstBtn = this.controls.querySelector<HTMLButtonElement>(".first-button");
+    if (firstBtn) firstBtn.disabled = this.currentPage <= 0;
+    const prevBtn = this.controls.querySelector<HTMLButtonElement>(".prev-button");
+    if (prevBtn) prevBtn.disabled = !this.canTurn("left");
+    const nextBtn = this.controls.querySelector<HTMLButtonElement>(".next-button");
+    if (nextBtn) nextBtn.disabled = !this.canTurn("right");
+    const lastBtn = this.controls.querySelector<HTMLButtonElement>(".last-button");
+    if (lastBtn) lastBtn.disabled = this.currentPage >= this.pages.length - 1;
+
     const visible = this.visibleIndices(this.currentPage).map((index) => index + 1);
-    this.pageInput.value = visible.length > 1 ? `${visible[0]}–${visible[1]} / ${this.pages.length}` : `${visible[0]} / ${this.pages.length}`;
+    this.pageInput.value = visible.length > 1 ? `${visible[0]}-${visible[1]}/${this.pages.length}` : `${visible[0]}/${this.pages.length}`;
     this.progress.style.width = `${((this.currentPage + 1) / this.pages.length) * 100}%`;
     const sound = this.controls.querySelector<HTMLButtonElement>(".sound-button");
     if (sound) {
       sound.setAttribute("aria-label", this.soundEnabled ? "Mute turn sound" : "Enable turn sound");
       sound.classList.toggle("is-muted", !this.soundEnabled);
+      sound.innerHTML = this.soundEnabled ? NAVBAR_ICONS.sound : NAVBAR_ICONS.soundMuted;
     }
     this.updateAutoplayButton();
   }
@@ -933,7 +977,7 @@ export class FlipbookEngine {
     if (!autoplay) return;
     const playing = this.autoplayTimer !== null;
     autoplay.setAttribute("aria-label", playing ? "Stop autoplay" : "Start autoplay");
-    autoplay.innerHTML = `<span aria-hidden="true">${playing ? "Ⅱ" : "▶"}</span>`;
+    autoplay.innerHTML = playing ? NAVBAR_ICONS.pause : NAVBAR_ICONS.play;
   }
 
   private toggleToc(force?: boolean): void {

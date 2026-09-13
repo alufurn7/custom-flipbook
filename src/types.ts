@@ -27,6 +27,7 @@ export interface FlipbookOptions {
   maxCachedPages?: number;
   curvature?: CurvatureEffect;
   soundSrc?: string;
+  logoSrc?: string;
 }
 
 export interface FoldGeometry {

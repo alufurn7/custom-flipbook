@@ -52,6 +52,7 @@ The root must have measurable width and height. Supply at least one page. Call
 | `maxCachedPages` | `number` | `10` | Retained content cap; raised if smaller than the protected preload window |
 | `curvature` | `"none" \| "multi-band"` | `"none"` | Optional crease-following highlight/compression shader |
 | `soundSrc` | `string` | `"pageflipFX.mp3"` | Sound effect file path or URL for page turns |
+| `logoSrc` | `string` | `"logo_gold.png"` | Logo image file path or URL for the navigation bar brand |
 
 In spread mode, navigation to an interior right-hand index is normalized to the
 containing spread. Covers remain single pages.
