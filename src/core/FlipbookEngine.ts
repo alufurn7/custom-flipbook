@@ -171,7 +171,7 @@ export class FlipbookEngine {
     if (this.animationFrame !== null) cancelAnimationFrame(this.animationFrame);
     if (this.dragFrame !== null) cancelAnimationFrame(this.dragFrame);
     this.resizeObserver.disconnect();
-    if (this.audioContext) void this.audioContext.close().catch(() => {});
+    if (this.audioContext) void this.audioContext.close().catch(() => { });
     for (const [index, content] of this.pageCache) this.pages[index].dispose?.(content);
     this.pageCache.clear();
     this.listeners.clear();
@@ -975,7 +975,7 @@ export class FlipbookEngine {
     try {
       this.audioContext ??= new AudioContext();
       const context = this.audioContext;
-      if (context.state === "suspended") void context.resume().catch(() => {});
+      if (context.state === "suspended") void context.resume().catch(() => { });
       const now = context.currentTime;
       const length = Math.max(0.09, duration);
       // Filtered, irregular noise gives paper friction without a pitched beep.
