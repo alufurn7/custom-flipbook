@@ -82,6 +82,8 @@ export class FlipbookEngine {
   private dragFrameTimestamp = 0;
   private soundEnabled = true;
   private audioContext: AudioContext | null = null;
+  private soundDataPromise: Promise<ArrayBuffer | null> | null = null;
+  private soundBuffer: AudioBuffer | null = null;
 
   constructor(root: HTMLElement, input: FlipbookOptions) {
     if (!input.pages.length) throw new Error("A flipbook requires at least one page.");
@@ -98,6 +100,7 @@ export class FlipbookEngine {
       spreadBreakpoint: input.spreadBreakpoint ?? 760,
       preloadRadius,
       curvature: input.curvature ?? "none",
+      soundSrc: input.soundSrc ?? "pageflipFX.mp3",
       maxCachedPages: Math.max(
         minimumCacheSize,
         Math.floor(input.maxCachedPages ?? 10)
@@ -105,6 +108,7 @@ export class FlipbookEngine {
     };
     this.currentPage = clamp(this.options.initialPage, 0, this.pages.length - 1);
     this.resizeObserver = new ResizeObserver(() => this.layout());
+    this.preloadSound();
     this.mount();
   }
 
@@ -172,6 +176,8 @@ export class FlipbookEngine {
     if (this.dragFrame !== null) cancelAnimationFrame(this.dragFrame);
     this.resizeObserver.disconnect();
     if (this.audioContext) void this.audioContext.close().catch(() => { });
+    this.soundBuffer = null;
+    this.soundDataPromise = null;
     for (const [index, content] of this.pageCache) this.pages[index].dispose?.(content);
     this.pageCache.clear();
     this.listeners.clear();
@@ -467,6 +473,7 @@ export class FlipbookEngine {
       this.finishPendingTurn();
     }
     if (this.phase !== "idle") return;
+    if (this.soundEnabled) void this.getDecodedSound();
     const local = this.toLocal(event);
     if (this.zoom > 1) {
       this.activePointer = event.pointerId;
@@ -970,54 +977,88 @@ export class FlipbookEngine {
     this.book.style.transform = `translate(${this.pan.x + centerOffset * this.zoom}px, ${this.pan.y}px) scale(${this.zoom})`;
   }
 
-  private playTurnSound(duration = 0.3): void {
+  private preloadSound(): void {
+    if (typeof fetch === "undefined" || !this.options.soundSrc) return;
+    this.soundDataPromise = fetch(this.options.soundSrc)
+      .then((res) => (res.ok ? res.arrayBuffer() : null))
+      .catch(() => null);
+  }
+
+  private getAudioContext(): AudioContext | null {
+    if (typeof window === "undefined") return null;
+    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return null;
+    this.audioContext ??= new AudioCtx();
+    return this.audioContext;
+  }
+
+  private async getDecodedSound(): Promise<AudioBuffer | null> {
+    if (this.soundBuffer) return this.soundBuffer;
+    const context = this.getAudioContext();
+    if (!context) return null;
+    if (!this.soundDataPromise) {
+      this.preloadSound();
+    }
+    const data = await this.soundDataPromise;
+    if (!data) return null;
+    try {
+      const copy = data.slice(0);
+      this.soundBuffer = await new Promise<AudioBuffer | null>((resolve) => {
+        const p = context.decodeAudioData(copy, (decoded) => resolve(decoded), () => resolve(null));
+        if (p && typeof p.then === "function") {
+          p.then(resolve).catch(() => resolve(null));
+        }
+      });
+      return this.soundBuffer;
+    } catch {
+      return null;
+    }
+  }
+
+  private playTurnSound(_duration = 0.3): void {
     if (!this.soundEnabled) return;
     try {
-      this.audioContext ??= new AudioContext();
-      const context = this.audioContext;
-      if (context.state === "suspended") void context.resume().catch(() => { });
-      const now = context.currentTime;
-      const length = Math.max(0.09, duration);
-      // Filtered, irregular noise gives paper friction without a pitched beep.
-      const buffer = context.createBuffer(1, Math.ceil(context.sampleRate * (length + 0.12)), context.sampleRate);
-      const data = buffer.getChannelData(0);
-      let softened = 0;
-      for (let i = 0; i < data.length; i += 1) {
-        softened = softened * 0.55 + (Math.random() * 2 - 1) * 0.45;
-        const t = i / context.sampleRate;
-        const texture = 0.7 + 0.18 * Math.sin(t * 83) + 0.12 * Math.sin(t * 137);
-        data[i] = softened * texture;
+      const context = this.getAudioContext();
+      if (!context) {
+        this.playFallbackSound();
+        return;
       }
-      const source = context.createBufferSource();
-      source.buffer = buffer;
-      const paper = context.createBiquadFilter();
-      paper.type = "bandpass";
-      paper.Q.value = 0.6;
-      paper.frequency.setValueAtTime(2400, now);
-      paper.frequency.exponentialRampToValueAtTime(750, now + length);
-      const rustle = context.createGain();
-      rustle.gain.setValueAtTime(0, now);
-      rustle.gain.linearRampToValueAtTime(0.16, now + length * 0.2);
-      rustle.gain.linearRampToValueAtTime(0.08, now + length * 0.65);
-      rustle.gain.linearRampToValueAtTime(0, now + length + 0.04);
-      const contact = context.createBiquadFilter();
-      contact.type = "lowpass";
-      contact.frequency.value = 380;
-      const landing = context.createGain();
-      landing.gain.setValueAtTime(0, now);
-      landing.gain.setValueAtTime(0, now + length * 0.86);
-      landing.gain.linearRampToValueAtTime(0.18, now + length);
-      landing.gain.exponentialRampToValueAtTime(0.0001, now + length + 0.1);
-      source.connect(paper).connect(rustle).connect(context.destination);
-      source.connect(contact).connect(landing).connect(context.destination);
-      source.onended = () => {
-        source.disconnect(); paper.disconnect(); rustle.disconnect();
-        contact.disconnect(); landing.disconnect();
+      if (context.state === "suspended") {
+        void context.resume().catch(() => { });
+      }
+      const playBuffer = (buffer: AudioBuffer) => {
+        if (!this.soundEnabled) return;
+        const source = context.createBufferSource();
+        source.buffer = buffer;
+        const gainNode = context.createGain();
+        gainNode.gain.value = 1.0;
+        source.connect(gainNode).connect(context.destination);
+        source.start(0);
       };
-      source.start(now);
-      source.stop(now + length + 0.12);
+
+      if (this.soundBuffer) {
+        playBuffer(this.soundBuffer);
+      } else {
+        void this.getDecodedSound().then((buffer) => {
+          if (buffer) {
+            playBuffer(buffer);
+          } else {
+            this.playFallbackSound();
+          }
+        });
+      }
     } catch {
-      this.soundEnabled = false;
+      this.playFallbackSound();
+    }
+  }
+
+  private playFallbackSound(): void {
+    if (!this.soundEnabled || typeof Audio === "undefined" || !this.options.soundSrc) return;
+    try {
+      const audio = new Audio(this.options.soundSrc);
+      void audio.play().catch(() => { });
+    } catch {
+      // ignore
     }
   }
 

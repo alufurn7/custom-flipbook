@@ -51,6 +51,7 @@ The root must have measurable width and height. Supply at least one page. Call
 | `preloadRadius` | `number` | `3` | Pages prepared on each side of the current page |
 | `maxCachedPages` | `number` | `10` | Retained content cap; raised if smaller than the protected preload window |
 | `curvature` | `"none" \| "multi-band"` | `"none"` | Optional crease-following highlight/compression shader |
+| `soundSrc` | `string` | `"pageflipFX.mp3"` | Sound effect file path or URL for page turns |
 
 In spread mode, navigation to an interior right-hand index is normalized to the
 containing spread. Covers remain single pages.

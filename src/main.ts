@@ -93,7 +93,8 @@ async function startBook() {
   spreadBreakpoint: 760,
   preloadRadius: 3,
   maxCachedPages: 10,
-  curvature: "multi-band"
+  curvature: "multi-band",
+  soundSrc: `${import.meta.env.BASE_URL}pageflipFX.mp3`
 });
 
 Object.assign(window, { paperfold: engine });
