@@ -1,121 +1,154 @@
 import "./styles.css";
 import { FlipbookEngine } from "./core/FlipbookEngine";
 import { enablePdfZoom } from "./pdfZoom";
-import type { PageDefinition } from "./types";
+import { LIBRARY_CONFIG, getBookById, type BookItem } from "./books";
+import { LibraryView } from "./libraryView";
 import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-const makePage = (
-  title: string,
-  section: string,
-  theme: string,
-  body: string,
-  extra = ""
-): PageDefinition => ({
-  title,
-  section,
-  render: () => {
-    const page = document.createElement("div");
-    page.className = `magazine-page ${theme}`;
-    page.dataset.folio = title;
-    page.innerHTML = `<p class="eyebrow">${section}</p><h2>${title}</h2><div class="rule"></div><p>${body}</p>${extra}`;
-    return page;
-  }
-});
-
-const pages: PageDefinition[] = [
-  {
-    title: "The Shape of Ideas",
-    section: "Paperfold Journal · Issue 01",
-    render: () => {
-      const page = document.createElement("div");
-      page.className = "magazine-page cover";
-      page.dataset.folio = "01";
-      page.innerHTML = `<p class="eyebrow">Paperfold Journal · Issue 01</p><h1>The shape<br>of ideas</h1><div class="rule"></div><p>A tactile, responsive publishing experiment built from live HTML.</p><div class="hero-block"></div>`;
-      return page;
-    }
-  },
-  makePage("Inside the fold", "Contents", "grid", "A study in interaction, geometry and digital craft.", `<div class="stat-grid"><div class="stat"><strong>01</strong>Motion</div><div class="stat"><strong>02</strong>Light</div><div class="stat"><strong>03</strong>Form</div><div class="stat"><strong>04</strong>Systems</div></div>`),
-  makePage("A physical illusion", "Essay", "sun", "A digital page does not need to bend like paper to feel tactile. A precise crease, a reflected surface and responsive light are enough to persuade the eye."),
-  makePage("Geometry first", "Engineering", "dark", "The crease is the perpendicular bisector between the grabbed corner and the pointer. Every visible layer follows from that one construction.", `<p class="quote">One line controls the entire fold.</p>`),
-  makePage("Masks in motion", "Rendering", "blue", "An oversized clipping surface rotates around the crease while the page face is reflected beneath it. The diagonal of the page guarantees complete coverage."),
-  makePage("Light sells depth", "Visual design", "", "Multiple narrow gradients make a straight fold read as curved paper. Their width and opacity respond continuously to progress and angle.", `<div class="stat-grid"><div class="stat"><strong>42%</strong>crease</div><div class="stat"><strong>18px</strong>edge</div></div>`),
-  makePage("Release has intent", "Interaction", "grid", "Distance alone makes a reader feel mechanical. Combining progress with directional velocity allows both deliberate slow turns and tiny confident flicks."),
-  makePage("Return to rest", "Interaction", "sun", "Pull a page inward, then return it to the edge. The engine recognizes the return and restores every layer without changing the page index."),
-  makePage("A small live window", "Performance", "dark", "Only the current pages and their near neighbors need rich DOM trees. The rest can remain lightweight definitions until the reader approaches them.", `<p class="quote">Six pages, not six hundred.</p>`),
-  makePage("One page or two", "Responsive", "blue", "The logical publication survives a layout change. Wide containers receive a spread; compact containers receive a single page with larger touch targets."),
-  makePage("Readable by design", "Accessibility", "", "Live text, native controls, keyboard navigation and polite announcements preserve the document's meaning beyond its visual effect."),
-  makePage("Zoom without losing place", "Navigation", "grid", "Fit scale and user zoom are separate. That distinction lets the container resize without unexpectedly resetting the reader's chosen view."),
-  makePage("Quiet machinery", "Architecture", "sun", "The state machine owns intent. Geometry owns truth. Rendering merely projects that state into layers that the browser can composite efficiently."),
-  makePage("Designed to extend", "API", "dark", "Pages can be images, HTML, components or later PDF surfaces. The fold engine only needs a page element with known dimensions."),
-  makePage("Measure the feeling", "Testing", "blue", "Unit tests protect the mathematics. Browser gestures and visual snapshots protect the experience. Both are necessary for a convincing reader."),
-  {
-    title: "Continue the story",
-    section: "Back cover",
-    render: () => {
-      const page = document.createElement("div");
-      page.className = "magazine-page cover";
-      page.dataset.folio = "16";
-      page.innerHTML = `<p class="eyebrow">Paperfold Engine</p><p class="quote">A page should respond before it turns.</p><div class="rule"></div><p>Drag any outer edge or corner to begin again.</p>`;
-      return page;
-    }
-  }
-];
-
 const app = document.querySelector<HTMLElement>("#app");
-if (!app) throw new Error("Missing application root");
+if (!app) throw new Error("Missing application root #app");
 
-async function startBook() {
-  const root = app!;
-  root.textContent = "Loading ALUFURN Catalogue…";
-  root.classList.add("catalogue-loading");
-  root.setAttribute("role", "status");
-  root.setAttribute("aria-busy", "true");
-  const demo = new URLSearchParams(location.search).get("demo") === "1";
-  const catalogue = demo ? null : await (await import("./pdf")).createPagesFromPdf(`${import.meta.env.BASE_URL}ALUFURN%20Catalogue.pdf`, {
-    workerSrc,
-    splitSpreads: true,
-    titlePrefix: "ALUFURN Catalogue",
-    section: "Catalogue",
-    scale: 3,
-    maxPixelRatio: 2
-  });
-  const firstPage = catalogue ? await catalogue.document.getPage(1) : null;
-  const dimensions = firstPage?.getViewport({ scale: 1 });
-  root.classList.remove("catalogue-loading");
-  root.removeAttribute("role");
-  const engine = new FlipbookEngine(root, {
-    pages: catalogue?.pages ?? pages,
-    initialPage: Math.max(0, (Number.parseInt(new URLSearchParams(location.search).get("page") ?? "1", 10) || 1) - 1),
-    pageWidth: 720,
-    pageHeight: dimensions ? 720 * dimensions.height / (dimensions.width / 2) : 1016,
-    turnDuration: 600,
-    autoplayInterval: 3000,
-    spreadBreakpoint: 760,
-    preloadRadius: 3,
-    maxCachedPages: 10,
-    curvature: "multi-band",
-    soundSrc: `${import.meta.env.BASE_URL}pageflipFX.mp3`,
-    logoSrc: `${import.meta.env.BASE_URL}logo_gold.png`
-  });
+let currentDispose: (() => void) | null = null;
 
-  Object.assign(window, { paperfold: engine });
-  const disposeZoom = catalogue ? enablePdfZoom(root, engine, catalogue.document) : () => {};
-  root.removeAttribute("aria-busy");
-  document.title = demo ? "Paperfold Flipbook Engine" : "ALUFURN Catalogue";
-  if (import.meta.hot) import.meta.hot.dispose(() => {
-    disposeZoom();
-    engine.destroy();
-    if (catalogue) void catalogue.destroy();
-  });
+function renderCurrentRoute(): void {
+  if (currentDispose) {
+    currentDispose();
+    currentDispose = null;
+  }
+
+  const params = new URLSearchParams(location.search);
+  const bookId = params.get("book");
+
+  if (bookId) {
+    const book = getBookById(bookId);
+    if (book) {
+      void startBook(book);
+      return;
+    }
+  }
+
+  showLibrary();
 }
 
-void startBook().catch((error) => {
-  console.error("Catalogue loading failed", error);
-  app.removeAttribute("aria-busy");
-  app.textContent = "Unable to load ALUFURN Catalogue. ";
-  const retry = document.createElement("button");
-  retry.textContent = "Try again";
-  retry.addEventListener("click", () => location.reload());
-  app.append(retry);
-  app.setAttribute("role", "alert");
+function navigateToBook(bookId: string): void {
+  const url = new URL(location.href);
+  url.searchParams.set("book", bookId);
+  url.searchParams.delete("page");
+  history.pushState({ bookId }, "", url.toString());
+  renderCurrentRoute();
+}
+
+function navigateToLibrary(): void {
+  const url = new URL(location.href);
+  url.searchParams.delete("book");
+  url.searchParams.delete("page");
+  history.pushState({}, "", url.pathname + (url.search ? url.search : ""));
+  renderCurrentRoute();
+}
+
+function showLibrary(): void {
+  document.title = "ALUFURN · Publications & Catalogues Library";
+  const libraryView = new LibraryView(app!, {
+    onSelectBook: (bookId) => navigateToBook(bookId)
+  });
+  libraryView.render();
+}
+
+async function startBook(book: BookItem): Promise<void> {
+  const root = app!;
+  root.className = "";
+  root.innerHTML = `
+    <div class="catalogue-loading" role="status" aria-busy="true">
+      <div class="catalogue-loading-spinner"></div>
+      <p class="catalogue-loading-title">Opening ${book.title}…</p>
+      <p class="catalogue-loading-sub">Preparing high-definition interactive pages</p>
+      <button type="button" class="catalogue-loading-back-btn">← Return to Library</button>
+    </div>
+  `;
+
+  const backBtn = root.querySelector(".catalogue-loading-back-btn");
+  backBtn?.addEventListener("click", () => navigateToLibrary());
+
+  try {
+    const fullPdfUrl = book.pdfUrl.startsWith("http") || book.pdfUrl.startsWith("/")
+      ? book.pdfUrl
+      : `${import.meta.env.BASE_URL}${encodeURIComponent(book.pdfUrl)}`;
+
+    const { createPagesFromPdf } = await import("./pdf");
+    const catalogue = await createPagesFromPdf(fullPdfUrl, {
+      workerSrc,
+      splitSpreads: book.splitSpreads ?? true,
+      titlePrefix: book.title,
+      section: "Catalogue",
+      scale: 3,
+      maxPixelRatio: 2
+    });
+
+    const firstPage = await catalogue.document.getPage(1);
+    const dimensions = firstPage.getViewport({ scale: 1 });
+    firstPage.cleanup();
+
+    root.innerHTML = "";
+
+    const initialPageParam = Number.parseInt(new URLSearchParams(location.search).get("page") ?? "1", 10);
+    const initialPage = Math.max(0, (Number.isFinite(initialPageParam) ? initialPageParam : 1) - 1);
+
+    const singlePageWidth = (book.splitSpreads ?? true) ? dimensions.width / 2 : dimensions.width;
+    const computedHeight = singlePageWidth > 0 ? 720 * dimensions.height / singlePageWidth : 1016;
+
+    const engine = new FlipbookEngine(root, {
+      pages: catalogue.pages,
+      initialPage,
+      pageWidth: 720,
+      pageHeight: computedHeight,
+      turnDuration: 600,
+      autoplayInterval: 3000,
+      spreadBreakpoint: 760,
+      preloadRadius: 3,
+      maxCachedPages: 10,
+      curvature: "multi-band",
+      soundSrc: `${import.meta.env.BASE_URL}pageflipFX.mp3`,
+      logoSrc: `${import.meta.env.BASE_URL}${LIBRARY_CONFIG.logoSrc}`,
+      onBackToLibrary: () => navigateToLibrary(),
+      websiteUrl: LIBRARY_CONFIG.websiteUrl,
+      websiteLabel: LIBRARY_CONFIG.websiteLabel
+    });
+
+    Object.assign(window, { paperfold: engine });
+    const disposeZoom = enablePdfZoom(root, engine, catalogue.document);
+
+    document.title = `${book.title} · ALUFURN Digital Flipbook`;
+
+    currentDispose = () => {
+      disposeZoom();
+      engine.destroy();
+      void catalogue.destroy();
+    };
+  } catch (error) {
+    console.error("Book loading failed", error);
+    root.innerHTML = `
+      <div class="catalogue-error" role="alert">
+        <h2>Unable to load catalogue</h2>
+        <p>There was an error loading the document. Please check your connection and try again.</p>
+        <div class="catalogue-error-actions">
+          <button type="button" class="btn-retry">Try again</button>
+          <button type="button" class="btn-back">← Back to Library</button>
+        </div>
+      </div>
+    `;
+    root.querySelector(".btn-retry")?.addEventListener("click", () => void startBook(book));
+    root.querySelector(".btn-back")?.addEventListener("click", () => navigateToLibrary());
+  }
+}
+
+window.addEventListener("popstate", () => {
+  renderCurrentRoute();
 });
+
+renderCurrentRoute();
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    if (currentDispose) currentDispose();
+  });
+}

@@ -28,6 +28,9 @@ export interface FlipbookOptions {
   curvature?: CurvatureEffect;
   soundSrc?: string;
   logoSrc?: string;
+  onBackToLibrary?: () => void;
+  websiteUrl?: string;
+  websiteLabel?: string;
 }
 
 export interface FoldGeometry {

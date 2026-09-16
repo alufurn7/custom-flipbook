@@ -52,7 +52,8 @@ const NAVBAR_ICONS: Record<string, string> = {
 export class FlipbookEngine {
   private readonly root: HTMLElement;
   private readonly pages: PageDefinition[];
-  private readonly options: Required<Omit<FlipbookOptions, "pages">>;
+  private readonly options: Required<Omit<FlipbookOptions, "pages" | "onBackToLibrary" | "websiteUrl" | "websiteLabel">> &
+    Pick<FlipbookOptions, "onBackToLibrary" | "websiteUrl" | "websiteLabel">;
   private readonly listeners = new Set<Listener>();
   private readonly pageCache = new Map<number, HTMLElement>();
   private readonly resizeObserver: ResizeObserver;
@@ -121,6 +122,9 @@ export class FlipbookEngine {
       curvature: input.curvature ?? "none",
       soundSrc: input.soundSrc ?? "pageflipFX.mp3",
       logoSrc: input.logoSrc ?? "logo_gold.png",
+      onBackToLibrary: input.onBackToLibrary,
+      websiteUrl: input.websiteUrl,
+      websiteLabel: input.websiteLabel,
       maxCachedPages: Math.max(
         minimumCacheSize,
         Math.floor(input.maxCachedPages ?? 10)
@@ -266,10 +270,35 @@ export class FlipbookEngine {
     this.brand.replaceChildren();
     this.controlsGroup.replaceChildren();
 
+    if (this.options.onBackToLibrary) {
+      const backBtn = create("button", "flipbook-button flipbook-back-btn") as HTMLButtonElement;
+      backBtn.type = "button";
+      backBtn.setAttribute("aria-label", "Back to Library");
+      backBtn.title = "Back to Library";
+      backBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg><span>Library</span>`;
+      backBtn.addEventListener("click", () => this.options.onBackToLibrary?.());
+      this.brand.append(backBtn);
+    }
+
     const logo = create("img", "flipbook-logo") as HTMLImageElement;
     logo.src = this.options.logoSrc;
-    logo.alt = "Logo";
+    logo.alt = "ALUFURN Logo";
+    if (this.options.onBackToLibrary) {
+      logo.style.cursor = "pointer";
+      logo.title = "Back to Library";
+      logo.addEventListener("click", () => this.options.onBackToLibrary?.());
+    }
     this.brand.append(logo);
+
+    if (this.options.websiteUrl) {
+      const webLink = create("a", "flipbook-website-link") as HTMLAnchorElement;
+      webLink.href = this.options.websiteUrl;
+      webLink.target = "_blank";
+      webLink.rel = "noopener noreferrer";
+      webLink.title = this.options.websiteLabel ?? "Visit our website";
+      webLink.innerHTML = `<span>${this.options.websiteLabel ?? "Visit website"}</span><svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>`;
+      this.brand.append(webLink);
+    }
 
     const makeButton = (label: string, iconKey: string, action: () => void, className = "") => {
       const button = create("button", `flipbook-button ${className}`.trim());
